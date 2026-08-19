@@ -1677,13 +1677,15 @@ def _resolve_explicit_runtime(
             base_url = normalize_actual_base_url(base_url)
 
         api_key = explicit_api_key
-        if not api_key:
+        creds: Optional[Dict[str, Any]] = None
+        if not api_key or not base_url:
             creds = resolve_api_key_provider_credentials(provider)
-            api_key = creds.get("api_key", "")
-            if not base_url:
-                base_url = creds.get("base_url", "").rstrip("/")
-                if provider == "actual":
-                    base_url = normalize_actual_base_url(base_url)
+        if not api_key and creds:
+            api_key = str(creds.get("api_key") or "").strip()
+        if not base_url and creds:
+            base_url = str(creds.get("base_url") or "").strip().rstrip("/")
+            if provider == "actual":
+                base_url = normalize_actual_base_url(base_url)
 
         api_mode = "chat_completions"
         if provider == "copilot":

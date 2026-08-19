@@ -7,6 +7,7 @@ pins the whole mapping against those measurements.
 """
 
 import json
+import os
 import sys
 from unittest.mock import patch
 
@@ -83,6 +84,7 @@ class TestProfileRegistration:
         p = _profile()
         assert p.name == "cloudflare-workers-ai"
         assert p.auth_type == "api_key"
+        assert p.requires_base_url is True
         assert p.api_mode == "chat_completions"
         assert p.supports_vision is True
         assert p.get_hostname() == "api.cloudflare.com"
@@ -188,6 +190,149 @@ class TestBaseUrl:
         mod = _plugin_module()
         with patch.object(mod, "_read_env", return_value=""):
             assert mod._resolve_base_url() == ""
+
+
+class TestEndpointReadiness:
+    def test_api_key_without_endpoint_is_not_authenticated(self):
+        from hermes_cli.auth import (
+            PROVIDER_REGISTRY,
+            AuthError,
+            get_api_key_provider_status,
+            resolve_api_key_provider_credentials,
+        )
+        from hermes_cli.models import list_available_providers
+        from hermes_cli.runtime_provider import _resolve_explicit_runtime
+
+        mod = _plugin_module()
+        p = _profile()
+        cfg = PROVIDER_REGISTRY["cloudflare-workers-ai"]
+        with patch.object(p, "base_url", ""), \
+             patch.object(cfg, "inference_base_url", ""), \
+             patch.object(mod, "_read_env", return_value=""), \
+             patch(
+                 "hermes_cli.auth._resolve_api_key_provider_secret",
+                 return_value=("k", "CLOUDFLARE_API_KEY"),
+             ), \
+             patch.dict(
+                 os.environ,
+                 {"CLOUDFLARE_ACCOUNT_ID": "", "CLOUDFLARE_BASE_URL": ""},
+             ):
+            status = get_api_key_provider_status("cloudflare-workers-ai")
+            row = next(
+                r for r in list_available_providers()
+                if r["id"] == "cloudflare-workers-ai"
+            )
+            with pytest.raises(AuthError) as creds_error:
+                resolve_api_key_provider_credentials("cloudflare-workers-ai")
+            with pytest.raises(AuthError) as runtime_error:
+                _resolve_explicit_runtime(
+                    provider="cloudflare-workers-ai",
+                    requested_provider="cloudflare-workers-ai",
+                    model_cfg={},
+                    explicit_api_key="k",
+                )
+
+        assert status["base_url"] == ""
+        assert status["configured"] is False
+        assert status["logged_in"] is False
+        assert row["authenticated"] is False
+        assert creds_error.value.code == "missing_base_url"
+        assert runtime_error.value.code == "missing_base_url"
+
+    def test_late_account_id_resolves_status_credentials_and_runtime(self):
+        from hermes_cli.auth import (
+            PROVIDER_REGISTRY,
+            get_api_key_provider_status,
+            resolve_api_key_provider_credentials,
+        )
+        from hermes_cli.runtime_provider import _resolve_explicit_runtime
+
+        mod = _plugin_module()
+        p = _profile()
+        cfg = PROVIDER_REGISTRY["cloudflare-workers-ai"]
+        expected = "https://api.cloudflare.com/client/v4/accounts/late/ai/v1"
+
+        def read_env(name):
+            return "late" if name == "CLOUDFLARE_ACCOUNT_ID" else ""
+
+        with patch.object(p, "base_url", ""), \
+             patch.object(cfg, "inference_base_url", ""), \
+             patch.object(mod, "_read_env", side_effect=read_env), \
+             patch(
+                 "hermes_cli.auth._resolve_api_key_provider_secret",
+                 return_value=("k", "CLOUDFLARE_API_KEY"),
+             ), \
+             patch.dict(
+                 os.environ,
+                 {"CLOUDFLARE_ACCOUNT_ID": "", "CLOUDFLARE_BASE_URL": ""},
+             ):
+            status = get_api_key_provider_status("cloudflare-workers-ai")
+            creds = resolve_api_key_provider_credentials("cloudflare-workers-ai")
+            runtime = _resolve_explicit_runtime(
+                provider="cloudflare-workers-ai",
+                requested_provider="cloudflare-workers-ai",
+                model_cfg={},
+                explicit_api_key="k",
+            )
+
+        assert status["configured"] is True
+        assert status["base_url"] == expected
+        assert creds["base_url"] == expected
+        assert runtime is not None
+        assert runtime["base_url"] == expected
+
+    def test_base_url_only_configuration_is_authenticated(self):
+        from hermes_cli.auth import (
+            PROVIDER_REGISTRY,
+            get_api_key_provider_status,
+            resolve_api_key_provider_credentials,
+        )
+
+        mod = _plugin_module()
+        p = _profile()
+        cfg = PROVIDER_REGISTRY["cloudflare-workers-ai"]
+        expected = "https://api.cloudflare.com/client/v4/accounts/explicit/ai/v1"
+        with patch.object(p, "base_url", ""), \
+             patch.object(cfg, "inference_base_url", ""), \
+             patch.object(mod, "_read_env", return_value=""), \
+             patch(
+                 "hermes_cli.auth._resolve_api_key_provider_secret",
+                 return_value=("k", "CLOUDFLARE_API_KEY"),
+             ), \
+             patch.dict(
+                 os.environ,
+                 {"CLOUDFLARE_ACCOUNT_ID": "", "CLOUDFLARE_BASE_URL": expected},
+             ):
+            status = get_api_key_provider_status("cloudflare-workers-ai")
+            creds = resolve_api_key_provider_credentials("cloudflare-workers-ai")
+
+        assert status["configured"] is True
+        assert status["base_url"] == expected
+        assert creds["base_url"] == expected
+
+    def test_endpoint_resolver_failure_keeps_required_provider_unconfigured(self):
+        from hermes_cli.auth import (
+            PROVIDER_REGISTRY,
+            get_api_key_provider_status,
+        )
+
+        p = _profile()
+        cfg = PROVIDER_REGISTRY["cloudflare-workers-ai"]
+        with patch.object(p, "base_url", ""), \
+             patch.object(cfg, "inference_base_url", ""), \
+             patch.object(p, "resolve_base_url", side_effect=RuntimeError("boom")), \
+             patch(
+                 "hermes_cli.auth._resolve_api_key_provider_secret",
+                 return_value=("k", "CLOUDFLARE_API_KEY"),
+             ), \
+             patch.dict(
+                 os.environ,
+                 {"CLOUDFLARE_ACCOUNT_ID": "", "CLOUDFLARE_BASE_URL": ""},
+             ):
+            status = get_api_key_provider_status("cloudflare-workers-ai")
+
+        assert status["configured"] is False
+        assert status["logged_in"] is False
 
 
 class TestModelsSearchUrl:

@@ -190,6 +190,15 @@ def _effort_table(model: str | None) -> dict[str, str | None]:
 class CloudflareWorkersAIProfile(ProviderProfile):
     """Workers AI — account-scoped base URL, bespoke catalog, effort dialects."""
 
+    def resolve_base_url(self, configured_url: str = "") -> str:
+        """Resolve an explicit override or the current account-scoped URL.
+
+        Re-read both inputs on every call so profile-scoped credentials loaded
+        after plugin import work for status, discovery, and inference alike.
+        """
+        explicit = (configured_url or _read_env("CLOUDFLARE_BASE_URL")).strip()
+        return (explicit or _resolve_base_url() or self.base_url).rstrip("/")
+
     # ── Catalog ──────────────────────────────────────────────────────────
 
     def _models_search_url(self, base_url: str | None) -> str:
@@ -351,5 +360,9 @@ cloudflare_workers_ai = CloudflareWorkersAIProfile(
         "@cf/zai-org/glm-5.2",
     ),
 )
+# Set after construction for compatibility with older Hermes installations
+# whose ProviderProfile dataclass predates the requires_base_url field. Those
+# profiles are not slotted, so the user-plugin form can still carry the flag.
+cloudflare_workers_ai.requires_base_url = True
 
 register_provider(cloudflare_workers_ai)

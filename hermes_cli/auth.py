@@ -7077,6 +7077,34 @@ def get_xai_oauth_auth_status() -> Dict[str, Any]:
         }
 
 
+def _resolve_profile_endpoint(provider_id: str, base_url: str) -> tuple[str, bool]:
+    """Resolve a provider profile's request-time endpoint and requirement flag.
+
+    Imports lazily because ``PROVIDER_REGISTRY`` is populated from profiles
+    while this module is importing. Runtime status/credential calls happen
+    after that cycle has completed.
+    """
+    resolved = str(base_url or "").strip().rstrip("/")
+    try:
+        from providers import get_provider_profile
+
+        profile = get_provider_profile(provider_id)
+    except Exception as exc:
+        logger.debug("Provider profile lookup failed for %s: %s", provider_id, exc)
+        return resolved, False
+    if profile is None:
+        return resolved, False
+
+    requires_base_url = bool(profile.requires_base_url)
+    try:
+        return profile.resolve_base_url(resolved), requires_base_url
+    except Exception as exc:
+        logger.debug("Profile endpoint resolution failed for %s: %s", provider_id, exc)
+        # Preserve the requirement on resolver failure: a required endpoint
+        # must fail closed rather than making an API key look sufficient.
+        return resolved, requires_base_url
+
+
 def get_api_key_provider_status(provider_id: str) -> Dict[str, Any]:
     """Status snapshot for API-key providers (z.ai, Kimi, MiniMax)."""
     pconfig = PROVIDER_REGISTRY.get(provider_id)
@@ -7098,6 +7126,8 @@ def get_api_key_provider_status(provider_id: str) -> Dict[str, Any]:
     else:
         base_url = pconfig.inference_base_url
 
+    base_url, requires_base_url = _resolve_profile_endpoint(provider_id, base_url)
+
     if provider_id == "actual":
         base_url = normalize_actual_base_url(base_url)
 
@@ -7106,14 +7136,16 @@ def get_api_key_provider_status(provider_id: str) -> Dict[str, Any]:
         and not api_key
         and is_actual_local_base_url(base_url)
     )
+    endpoint_ready = bool(base_url) or not requires_base_url
+    configured = (bool(api_key) and endpoint_ready) or actual_local_noauth
 
     return {
-        "configured": bool(api_key) or actual_local_noauth,
+        "configured": configured,
         "provider": provider_id,
         "name": pconfig.name,
         "key_source": key_source or ("local-offline" if actual_local_noauth else ""),
         "base_url": base_url,
-        "logged_in": bool(api_key) or actual_local_noauth,  # compat with OAuth status shape
+        "logged_in": configured,  # compat with OAuth status shape
     }
 
 
@@ -7319,6 +7351,8 @@ def resolve_api_key_provider_credentials(provider_id: str) -> Dict[str, Any]:
     if provider_id == "lmstudio":
         base_url = _normalize_lmstudio_runtime_base_url(base_url)
 
+    base_url, requires_base_url = _resolve_profile_endpoint(provider_id, base_url)
+
     if provider_id == "actual":
         base_url = normalize_actual_base_url(base_url)
 
@@ -7327,6 +7361,17 @@ def resolve_api_key_provider_credentials(provider_id: str) -> Dict[str, Any]:
     # otherwise wedges chat inference — #50252).
     if not (isinstance(base_url, str) and base_url.strip()):
         base_url = pconfig.inference_base_url
+    if requires_base_url and not base_url:
+        hint = (
+            f" Set {pconfig.base_url_env_var}."
+            if pconfig.base_url_env_var
+            else " Configure the provider endpoint."
+        )
+        raise AuthError(
+            f"No inference endpoint found for provider '{provider_id}'.{hint}",
+            provider=provider_id,
+            code="missing_base_url",
+        )
 
     if not api_key and provider_id == "actual" and is_actual_local_base_url(base_url):
         api_key = ACTUAL_LOCAL_NOAUTH_PLACEHOLDER
