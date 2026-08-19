@@ -314,7 +314,7 @@ cloudflare_workers_ai = CloudflareWorkersAIProfile(
     # CLOUDFLARE_ACCOUNT_ID is deliberately NOT listed: auth.py treats every
     # non-URL env var as an API-key candidate, and an account id offered as a
     # bearer token would authenticate nothing while masking the real error.
-    # It is consumed by the base_url property instead.
+    # It is consumed by the account-scoped URL resolver instead.
     env_vars=("CLOUDFLARE_API_KEY", "CLOUDFLARE_BASE_URL"),
     # Assembled from CLOUDFLARE_ACCOUNT_ID; "" when that is unset, in which
     # case CLOUDFLARE_BASE_URL (wired as this provider's base_url_env_var)

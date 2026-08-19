@@ -290,6 +290,88 @@ class TestFetchModels:
             assert p.fetch_models(api_key="k") is None
 
 
+class TestProviderModelIds:
+    """The picker must not require a non-empty import-time profile base URL."""
+
+    _LATE_MODEL = "@cf/example/new-tool-model"
+    _LIVE_PAYLOAD = {
+        "success": True,
+        "result": [
+            {
+                "name": _LATE_MODEL,
+                "properties": [
+                    {"property_id": "function_calling", "value": "true"}
+                ],
+            }
+        ],
+    }
+
+    def test_account_id_loaded_after_profile_import_still_fetches_live_models(self):
+        from hermes_cli.models import provider_model_ids
+
+        mod = _plugin_module()
+        p = _profile()
+        late_base = "https://api.cloudflare.com/client/v4/accounts/late/ai/v1"
+        with patch.object(p, "base_url", ""), \
+             patch.object(mod, "_resolve_base_url", return_value=late_base), \
+             patch(
+                 "hermes_cli.auth.resolve_api_key_provider_credentials",
+                 return_value={"api_key": "k", "base_url": ""},
+             ), \
+             patch(
+                 "hermes_cli.urllib_security.open_credentialed_url",
+                 return_value=_FakeResponse(self._LIVE_PAYLOAD),
+             ) as opened:
+            models = provider_model_ids("cloudflare-workers-ai")
+
+        assert self._LATE_MODEL in models
+        request = opened.call_args.args[0]
+        assert request.full_url.startswith(
+            "https://api.cloudflare.com/client/v4/accounts/late/ai/models/search?"
+        )
+
+    def test_base_url_only_configuration_still_fetches_live_models(self):
+        from hermes_cli.models import provider_model_ids
+
+        mod = _plugin_module()
+        p = _profile()
+        configured_base = (
+            "https://api.cloudflare.com/client/v4/accounts/from-base-url/ai/v1"
+        )
+        with patch.object(p, "base_url", ""), \
+             patch.object(mod, "_resolve_base_url", return_value=""), \
+             patch(
+                 "hermes_cli.auth.resolve_api_key_provider_credentials",
+                 return_value={"api_key": "k", "base_url": configured_base},
+             ), \
+             patch(
+                 "hermes_cli.urllib_security.open_credentialed_url",
+                 return_value=_FakeResponse(self._LIVE_PAYLOAD),
+             ) as opened:
+            models = provider_model_ids("cloudflare-workers-ai")
+
+        assert self._LATE_MODEL in models
+        request = opened.call_args.args[0]
+        assert request.full_url.startswith(
+            "https://api.cloudflare.com/client/v4/accounts/from-base-url/ai/models/search?"
+        )
+
+    def test_missing_endpoint_still_returns_profile_fallbacks(self):
+        from hermes_cli.models import provider_model_ids
+
+        mod = _plugin_module()
+        p = _profile()
+        with patch.object(p, "base_url", ""), \
+             patch.object(mod, "_resolve_base_url", return_value=""), \
+             patch(
+                 "hermes_cli.auth.resolve_api_key_provider_credentials",
+                 return_value={"api_key": "k", "base_url": ""},
+             ):
+            models = provider_model_ids("cloudflare-workers-ai")
+
+        assert models == list(p.fallback_models)
+
+
 class TestReasoningEffort:
     @pytest.mark.parametrize("model,accepted", sorted(ACCEPTED_BY_MODEL.items()))
     def test_never_emits_a_rejected_level(self, model, accepted):
