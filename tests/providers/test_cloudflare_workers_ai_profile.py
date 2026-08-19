@@ -116,10 +116,63 @@ class TestProfileRegistration:
 
         assert "cloudflare-workers-ai" in {p.slug for p in CANONICAL_PROVIDERS}
 
+    def test_appears_in_the_model_picker(self):
+        from hermes_cli.models import list_available_providers
+
+        row = next(
+            r for r in list_available_providers()
+            if r["id"] == "cloudflare-workers-ai"
+        )
+        assert row["label"] == "Cloudflare Workers AI"
+        # Surfaced from _PROVIDER_ALIASES, not from the profile — see
+        # TestProviderAliasRouting for why that distinction bites.
+        assert set(row["aliases"]) == {"cloudflare", "workers-ai", "cloudflare-ai"}
+
     def test_fallback_models_are_all_cf_scoped(self):
         p = _profile()
         assert len(p.fallback_models) == 16
         assert all(m.startswith("@cf/") for m in p.fallback_models)
+
+
+class TestProviderAliasRouting:
+    """Profile aliases must also be mirrored into models._PROVIDER_ALIASES.
+
+    A profile's ``aliases`` auto-extend ``PROVIDER_REGISTRY`` (auth.py) and
+    ``CANONICAL_PROVIDERS``, but NOT ``_PROVIDER_ALIASES``.  An alias missing
+    from that map does not raise — ``parse_model_input`` silently falls
+    through to openrouter carrying the whole ``"cloudflare:@cf/..."`` string
+    as a model name, which reaches the user as a bogus OpenRouter model error
+    that never mentions Cloudflare.
+    """
+
+    @pytest.mark.parametrize("alias", ["cloudflare", "workers-ai", "cloudflare-ai"])
+    def test_alias_normalizes_to_canonical_slug(self, alias):
+        from hermes_cli.models import normalize_provider, provider_label
+
+        assert normalize_provider(alias) == "cloudflare-workers-ai"
+        assert provider_label(alias) == "Cloudflare Workers AI"
+
+    @pytest.mark.parametrize(
+        "typed,expected_model",
+        [
+            ("cloudflare:@cf/zai-org/glm-5.2", "@cf/zai-org/glm-5.2"),
+            ("workers-ai:@cf/qwen/qwen3.8-27b", "@cf/qwen/qwen3.8-27b"),
+            ("cloudflare-workers-ai:@cf/openai/gpt-oss-120b", "@cf/openai/gpt-oss-120b"),
+        ],
+    )
+    def test_provider_model_shorthand_routes_to_cloudflare(self, typed, expected_model):
+        from hermes_cli.models import parse_model_input
+
+        assert parse_model_input(typed, "openrouter") == (
+            "cloudflare-workers-ai",
+            expected_model,
+        )
+
+    def test_does_not_hijack_an_existing_alias(self):
+        """``qwen`` is claimed by alibaba; adding ours must not steal it."""
+        from hermes_cli.models import normalize_provider
+
+        assert normalize_provider("qwen") == "alibaba"
 
 
 class TestBaseUrl:

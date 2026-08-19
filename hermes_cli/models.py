@@ -1408,6 +1408,14 @@ _PROVIDER_ALIASES = {
     "lm_studio": "lmstudio",
     "ollama": "custom",  # bare "ollama" = local; use "ollama-cloud" for cloud
     "ollama_cloud": "ollama-cloud",
+    # Mirrors CloudflareWorkersAIProfile.aliases. Profile-declared aliases
+    # auto-extend PROVIDER_REGISTRY (auth.py) and CANONICAL_PROVIDERS (below)
+    # but NOT this map, so a `provider:model` shorthand typed against an
+    # alias that is missing here falls through to openrouter carrying the
+    # whole "cloudflare:@cf/..." string as a model name.
+    "cloudflare": "cloudflare-workers-ai",
+    "workers-ai": "cloudflare-workers-ai",
+    "cloudflare-ai": "cloudflare-workers-ai",
 }
 
 
