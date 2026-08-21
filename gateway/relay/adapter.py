@@ -1887,6 +1887,14 @@ class RelayAdapter(BasePlatformAdapter):
                 seal.error,
             )
         if explicit_platform:
+            if _interim:
+                # Re-stamp: _interim_send was popped above for THIS door's
+                # seal-interception check; send_for_platform() pops its own
+                # copy. Forwarding without re-stamping made an interim send
+                # with an explicit logical platform look turn-final to the
+                # second egress door — sealing a live stream with interim
+                # text (#13, stream-final contract invariant 3).
+                send_metadata["_interim_send"] = True
             return await self.send_for_platform(
                 explicit_platform,
                 chat_id,
