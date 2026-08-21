@@ -32,6 +32,7 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
 import logging
@@ -119,13 +120,18 @@ def _import_plugin_dir(plugin_dir: Path, source: str) -> None:
 
     # Give bundled plugins a stable import path (``plugins.model_providers.<name>``)
     # so relative imports within the plugin work. User plugins load via
-    # ``importlib.util.spec_from_file_location`` with a unique module name so
-    # multiple HERMES_HOME profiles don't alias each other.
+    # ``importlib.util.spec_from_file_location`` with a module name that embeds a
+    # short hash of the resolved plugin directory, so same-named user provider
+    # dirs under DIFFERENT HERMES_HOME profiles (multiplex gateways) never alias
+    # each other through the ``sys.modules`` cache below.
     safe_name = plugin_dir.name.replace("-", "_")
     if source == "bundled":
         module_name = f"plugins.model_providers.{safe_name}"
     else:
-        module_name = f"_hermes_user_provider_{safe_name}"
+        dir_hash = hashlib.sha256(
+            str(plugin_dir.resolve()).encode("utf-8")
+        ).hexdigest()[:8]
+        module_name = f"_hermes_user_provider_{safe_name}_{dir_hash}"
 
     if module_name in sys.modules:
         return  # already imported
@@ -259,11 +265,15 @@ def _requires_arguments(fn) -> bool:
     except (TypeError, ValueError):  # pragma: no cover — builtins/C callables
         return False
     for param in sig.parameters.values():
-        if param.kind in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        ) and param.default is inspect.Parameter.empty:
+        if (
+            param.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+            and param.default is inspect.Parameter.empty
+        ):
             return True
     return False
 
