@@ -890,7 +890,16 @@ def list_skins() -> List[Dict[str, str]]:
 
 
 def load_skin(name: str) -> SkinConfig:
-    """Load a skin by name. Checks user skins first, then built-in."""
+    """Load a skin by name.
+
+    Built-ins take precedence over user skins (#34): ``list_skins()`` hides
+    user files that shadow a built-in name, so the loader must agree or the
+    listing shows one skin while another renders.
+    """
+    # Built-in skins first
+    if name in _BUILTIN_SKINS:
+        return _build_skin_config(_BUILTIN_SKINS[name])
+
     # Check user skins directory
     skins_path = _skins_dir()
     user_file = skins_path / f"{name}.yaml"
@@ -899,11 +908,9 @@ def load_skin(name: str) -> SkinConfig:
         if data:
             return _build_skin_config(data)
 
-    # Check built-in skins
-    if name in _BUILTIN_SKINS:
-        return _build_skin_config(_BUILTIN_SKINS[name])
-
-    # Fallback to default
+    # Fallback to default — the caller must report the EFFECTIVE name (#34),
+    # not the requested one, so status output can't claim a skin that isn't
+    # rendering.
     logger.warning("Skin '%s' not found, using default", name)
     return _build_skin_config(_BUILTIN_SKINS["default"])
 
@@ -913,19 +920,26 @@ def get_active_skin() -> SkinConfig:
     global _active_skin
     if _active_skin is None:
         _active_skin = load_skin(_active_skin_name)
+        # Sync to the effective name so a startup fallback to default isn't
+        # reported as the configured-but-missing skin (#34).
+        globals()["_active_skin_name"] = (
+            getattr(_active_skin, "name", None) or _active_skin_name
+        )
     return _active_skin
 
 
 def set_active_skin(name: str) -> SkinConfig:
     """Switch the active skin. Returns the new SkinConfig."""
     global _active_skin, _active_skin_name
-    _active_skin_name = name
     _active_skin = load_skin(name)
+    # Report the EFFECTIVE skin (#34): after fallback-to-default the requested
+    # name is not what's rendering.
+    _active_skin_name = getattr(_active_skin, "name", name) or name
     return _active_skin
 
 
 def get_active_skin_name() -> str:
-    """Get the name of the currently active skin."""
+    """Get the name of the currently active (effective) skin."""
     return _active_skin_name
 
 
