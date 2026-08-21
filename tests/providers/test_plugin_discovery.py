@@ -12,22 +12,21 @@ import sys
 from pathlib import Path
 
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _clear_provider_caches():
     """Force providers/__init__.py to re-discover on next list_providers()."""
     import providers as _pkg
+
     _pkg._REGISTRY.clear()
     _pkg._ALIASES.clear()
     _pkg._PROVIDER_LIST_CACHE = None
     _pkg._discovered = False
     # Evict any cached plugin modules so the next import re-executes.
     for mod in list(sys.modules.keys()):
-        if (
-            mod.startswith("plugins.model_providers")
-            or mod.startswith("_hermes_user_provider")
+        if mod.startswith("plugins.model_providers") or mod.startswith(
+            "_hermes_user_provider"
         ):
             del sys.modules[mod]
 
@@ -38,7 +37,9 @@ def test_bundled_plugins_discovered():
     assert plugins_dir.is_dir(), f"Missing {plugins_dir}"
 
     child_dirs = [c for c in plugins_dir.iterdir() if c.is_dir()]
-    assert len(child_dirs) >= 28, f"Expected at least 28 provider plugins, found {len(child_dirs)}"
+    assert len(child_dirs) >= 28, (
+        f"Expected at least 28 provider plugins, found {len(child_dirs)}"
+    )
 
     for child in child_dirs:
         assert (child / "__init__.py").exists(), f"{child.name} missing __init__.py"
@@ -68,8 +69,16 @@ def test_all_profiles_register():
 
     # Spot-check representative providers from different categories
     for required in (
-        "openrouter", "anthropic", "custom", "bedrock", "openai-codex",
-        "minimax-oauth", "gmi", "xiaomi", "alibaba-coding-plan", "fireworks",
+        "openrouter",
+        "anthropic",
+        "custom",
+        "bedrock",
+        "openai-codex",
+        "minimax-oauth",
+        "gmi",
+        "xiaomi",
+        "alibaba-coding-plan",
+        "fireworks",
     ):
         assert required in names, f"Missing profile: {required}"
 
@@ -119,7 +128,48 @@ def test_user_plugin_overrides_bundled(tmp_path, monkeypatch):
     # Clean up: reset discovery state so other tests see the bundled version
     _clear_provider_caches()
 
-
     # No import means the module must NOT be in the plugins list as a loaded one.
     # We check that the general loader didn't crash and didn't raise from the
     # broken __init__.py.
+
+
+def test_user_plugin_module_names_are_dir_unique(tmp_path):
+    """Same-named user provider dirs in DIFFERENT homes must not alias each other.
+
+    Regression for F-PROV-ALIAS-5: the synthetic module name used to be derived
+    from the directory name alone, so under multiplex profiles a second profile
+    with ``plugins/model-providers/custom/`` silently reused the first profile's
+    already-imported module via the ``sys.modules`` cache.
+    """
+    import hashlib
+
+    import providers as _pkg
+
+    init_src = "MARKER = 'loaded'\n"
+    dir_a = tmp_path / "homeA" / "plugins" / "model-providers" / "custom"
+    dir_b = tmp_path / "homeB" / "plugins" / "model-providers" / "custom"
+    for d in (dir_a, dir_b):
+        d.mkdir(parents=True)
+        (d / "__init__.py").write_text(init_src, encoding="utf-8")
+
+    _pkg._import_plugin_dir(dir_a, source="user")
+    _pkg._import_plugin_dir(dir_b, source="user")
+
+    def expected_name(d):
+        h = hashlib.sha256(str(d.resolve()).encode("utf-8")).hexdigest()[:8]
+        return f"_hermes_user_provider_custom_{h}"
+
+    name_a, name_b = expected_name(dir_a), expected_name(dir_b)
+    assert name_a != name_b, "same-named user provider dirs must get distinct module names"
+    mod_a = sys.modules.get(name_a)
+    mod_b = sys.modules.get(name_b)
+    assert mod_a is not None and getattr(mod_a, "MARKER", None) == "loaded", (
+        f"first user provider dir not imported under {name_a}"
+    )
+    assert mod_b is not None and getattr(mod_b, "MARKER", None) == "loaded", (
+        f"second same-named user provider dir was aliased/skipped instead of imported under {name_b}"
+    )
+
+    # Cleanup so other tests don't see these synthetic modules.
+    for n in (name_a, name_b):
+        sys.modules.pop(n, None)
