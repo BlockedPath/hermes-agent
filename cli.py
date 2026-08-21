@@ -474,7 +474,11 @@ def load_cli_config() -> Dict[str, Any]:
             "min_tail_user_messages": 1,  # Real user messages guaranteed in the tail (1 = existing single anchor)
         },
         "agent": {
-            "max_turns": 500,  # Default max tool-calling iterations (shared with subagents)
+            # Canonical default lives in hermes_cli/config_defaults.py (None =
+            # unlimited via resolve_turn_limit). The historic hardcode of 500
+            # here silently truncated classic CLI sessions long before the
+            # documented unlimited default applied (#3).
+            "max_turns": None,
             "verbose": False,
             "system_prompt": "",
             "prefill_messages_file": "",
@@ -5002,7 +5006,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             reasoning: Reasoning effort override for this run (none|minimal|low|medium|high|xhigh|max|ultra). Wins over config.
             api_key: API key (default: from environment)
             base_url: API base URL (default: OpenRouter)
-            max_turns: Maximum tool-calling iterations shared with subagents (default: 500)
+            max_turns: Maximum tool-calling iterations shared with subagents (default: unlimited, per canonical config)
             verbose: Enable verbose logging
             compact: Use compact display mode
             resume: Session ID to resume (restores conversation history from SQLite)
