@@ -887,7 +887,14 @@ def compute_toolset_availability(enabled_toolsets: List[str] = None) -> Dict[str
     snapshotted to disk and replayed on the next launch without importing
     ``model_tools`` (see ``load_banner_snapshot``).
     """
-    from model_tools import check_tool_availability, TOOLSET_REQUIREMENTS
+    from model_tools import check_tool_availability
+    # Live registry lookup (#17): TOOLSET_REQUIREMENTS is an import-time
+    # snapshot frozen before MCP/plugin discovery, so its metadata goes stale
+    # for later-registered toolsets. get_toolset_requirements() reads the live
+    # registry and always agrees with check_tool_availability().
+    from tools.registry import registry as _tool_registry
+
+    toolset_requirements = _tool_registry.get_toolset_requirements()
 
     enabled_toolsets = enabled_toolsets or []
     _, unavailable_toolsets = check_tool_availability(quiet=True)
@@ -910,7 +917,7 @@ def compute_toolset_availability(enabled_toolsets: List[str] = None) -> Dict[str
     lazy_tools = set()
     for item in unavailable_toolsets:
         toolset_name = item.get("name", "")
-        ts_req = TOOLSET_REQUIREMENTS.get(toolset_name, {})
+        ts_req = toolset_requirements.get(toolset_name, {})
         tools_in_ts = item.get("tools", [])
         if ts_req.get("check_fn"):
             lazy_tools.update(tools_in_ts)

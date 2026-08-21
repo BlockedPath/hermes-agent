@@ -138,7 +138,9 @@ class TestToolSurfaceSwap:
         entry = registry.get_entry("browser_exec")
         assert entry is not None
         assert entry.check_fn is bu_cli.is_browser_use_cli_mode
-        assert entry.toolset == "browser-use"
+        # Canonical 'browser' toolset (#17): the static toolsets.py list owns
+        # browser_exec; the phantom 'browser-use' set was unconfigurable.
+        assert entry.toolset == "browser"
 
     def test_browser_exec_in_browser_toolsets(self):
         from toolsets import TOOLSETS, _HERMES_CORE_TOOLS

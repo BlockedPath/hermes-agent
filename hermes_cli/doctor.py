@@ -2885,7 +2885,14 @@ def run_doctor(args):
     try:
         # Add project root to path for imports
         sys.path.insert(0, str(PROJECT_ROOT))
-        from model_tools import check_tool_availability, TOOLSET_REQUIREMENTS
+        from model_tools import check_tool_availability
+        # Live registry lookup (#17): the import-time TOOLSET_REQUIREMENTS
+        # snapshot predates MCP/plugin discovery and goes stale for
+        # later-registered toolsets; get_toolset_requirements() always agrees
+        # with check_tool_availability().
+        from tools.registry import registry as _tool_registry
+
+        toolset_requirements = _tool_registry.get_toolset_requirements()
         
         available, unavailable = check_tool_availability()
         available, unavailable = _apply_doctor_tool_availability_overrides(available, unavailable)
@@ -2900,7 +2907,7 @@ def run_doctor(args):
                 unavailable = [item for item in unavailable if item.get("name") != "web"]
 
         for tid in available:
-            info = TOOLSET_REQUIREMENTS.get(tid, {})
+            info = toolset_requirements.get(tid, {})
             check_ok(info.get("name", tid), _doctor_tool_availability_detail(tid))
 
         for status, label, detail in web_rows:
