@@ -97,6 +97,10 @@ export class JsonRpcGatewayClient {
   private pending = new Map<GatewayRequestId, PendingCall>()
   private socket: WebSocketLike | null = null
   private state: ConnectionState = 'idle'
+  /** Set while a connect() handshake is in flight; close() uses it to settle
+   * the pending connect() promise immediately instead of letting it hang
+   * until the handshake timeout (and flap closed→error) afterwards (#19). */
+  private abortConnect: ((reason: Error) => void) | null = null
   private readonly eventHandlers = new Map<string, Set<(event: GatewayEvent) => void>>()
   private readonly stateHandlers = new Set<(state: ConnectionState) => void>()
   private readonly options: Required<Omit<GatewayClientOptions, 'socketFactory'>> &
@@ -187,6 +191,9 @@ export class JsonRpcGatewayClient {
 
         socket.removeEventListener('open', onOpen)
         socket.removeEventListener('error', onError)
+        if (this.abortConnect) {
+          this.abortConnect = null
+        }
       }
 
       const onOpen = () => {
@@ -209,6 +216,26 @@ export class JsonRpcGatewayClient {
         cleanup()
         this.setState('error')
         reject(new Error(this.options.connectErrorMessage))
+      }
+
+      // close() during 'connecting' settles the handshake immediately with the
+      // closed error — without this the caller hangs until the connect timeout
+      // and then observes a spurious closed→error flap (#19).
+      this.abortConnect = (reason: Error) => {
+        if (settled || this.socket !== socket) {
+          return
+        }
+
+        settled = true
+        cleanup()
+
+        try {
+          socket.close()
+        } catch {
+          // ignore
+        }
+
+        reject(reason)
       }
 
       socket.addEventListener('open', onOpen, { once: true })
@@ -252,6 +279,15 @@ export class JsonRpcGatewayClient {
     try {
       socket.close()
     } finally {
+      // Settle an in-flight connect() handshake BEFORE clearing this.socket:
+      // the aborter's stale-socket guard requires the match, and settling now
+      // clears the handshake timer and rejects the promise with the closed
+      // error so callers neither hang until the connect timeout nor observe a
+      // spurious closed→error flap afterwards (#19).
+      const abort = this.abortConnect
+      this.abortConnect = null
+      abort?.(new Error(this.options.closedErrorMessage))
+
       this.socket = null
       this.setState('closed')
       this.rejectAllPending(new Error(this.options.closedErrorMessage))
