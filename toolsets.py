@@ -766,7 +766,7 @@ def bundle_non_core_tools(toolset_name: str) -> Set[str]:
 _resolve_toolset_memo: Dict[Tuple[str, bool, int, int], List[str]] = {}
 
 
-def resolve_toolset(name: str, visited: Optional[Set[str]] = None, *, include_registry: bool = True) -> List[str]:
+def resolve_toolset(name: str, visited: Set[str] = None, *, include_registry: bool = True) -> List[str]:
     """
     Recursively resolve a toolset to get all tool names.
 
@@ -994,8 +994,8 @@ def validate_toolset(name: str) -> bool:
 def create_custom_toolset(
     name: str,
     description: str,
-    tools: Optional[List[str]] = None,
-    includes: Optional[List[str]] = None
+    tools: List[str] = None,
+    includes: List[str] = None
 ) -> None:
     """
     Create a custom toolset at runtime.
