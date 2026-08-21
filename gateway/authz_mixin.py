@@ -29,32 +29,37 @@ from gateway.whatsapp_identity import (
 
 
 def _auth_env(name: str, default: str = "") -> str:
-    """Read allowlist/auth env; prefer profile secret_scope under multiplex."""
-    if not name:
-        return default
-    try:
-        from agent.secret_scope import get_secret
+    """Read an authorization env var with per-profile isolation.
 
-        val = get_secret(name)
-        if val is not None and str(val).strip():
-            return str(val).strip()
-    except Exception:
-        pass
-    return (os.getenv(name) or default).strip()
+    Scope-authoritative under multiplex (issue #72348 / #86905 class): when a
+    profile secret scope is installed AND multiplexing is active, a key
+    absent from the scope returns ``default`` instead of falling through to
+    ``os.environ`` — the process env may hold ANOTHER profile's value there,
+    and leaking it into an authorization decision is fail-open (allow-all
+    flags) or silently wrong (allowlists). Single-profile deployments — no
+    scope installed, or multiplex off — behave exactly like the legacy
+    ``os.getenv`` read. Kept as a distinct name from
+    ``_platform_gate_env`` because many callers patch it directly in tests;
+    both share identical scope-authoritative semantics.
+    """
+    return _platform_gate_env(name, default)
 
 
 def _platform_gate_env(name: str, default: str = "") -> str:
     """Read a platform allow/deny gate env var with per-profile isolation.
 
-    Like ``_auth_env`` but authoritative under multiplex: when a profile
-    secret scope is installed AND multiplexing is active, a key absent from
-    the scope returns ``default`` instead of falling through to
-    ``os.environ``. Under multiplex the process env may hold ANOTHER
-    profile's first-writer-bridged value (the YAML→env bridges in the
-    Discord/Telegram adapters' ``_apply_yaml_config`` are first-writer-wins),
-    so falling through would leak profile A's allowlist into profile B
-    (issue #72348). Single-profile deployments — no scope installed, or
-    multiplex off — behave exactly like the legacy ``os.getenv`` read.
+    Authoritative under multiplex: when a profile secret scope is installed
+    AND multiplexing is active, a key absent from the scope returns
+    ``default`` instead of falling through to ``os.environ``. Under multiplex
+    the process env may hold ANOTHER profile's first-writer-bridged value
+    (the YAML→env bridges in the Discord/Telegram adapters'
+    ``_apply_yaml_config`` are first-writer-wins), so falling through would
+    leak profile A's allowlist into profile B (issue #72348).
+    Single-profile deployments — no scope installed, or multiplex off —
+    behave exactly like the legacy ``os.getenv`` read.
+
+    ``_auth_env`` delegates here; they share one implementation so all
+    authorization reads can never drift apart again (audit F-GW-1/F-GW-2).
     """
     if not name:
         return default
@@ -302,7 +307,9 @@ class GatewayAuthorizationMixin:
         if not platform:
             return ""
         adapter = self._authorization_adapter(platform, profile)
-        policy = getattr(adapter, "_group_policy", None) if adapter is not None else None
+        policy = (
+            getattr(adapter, "_group_policy", None) if adapter is not None else None
+        )
         if policy is None:
             config = getattr(self, "config", None)
             platform_cfg = (
@@ -353,7 +360,11 @@ class GatewayAuthorizationMixin:
         if not isinstance(group_cfg, dict):
             lowered = chat_id_str.lower()
             for key, value in groups.items():
-                if isinstance(key, str) and key.lower() == lowered and isinstance(value, dict):
+                if (
+                    isinstance(key, str)
+                    and key.lower() == lowered
+                    and isinstance(value, dict)
+                ):
                     group_cfg = value
                     break
         if not isinstance(group_cfg, dict):
@@ -391,7 +402,7 @@ class GatewayAuthorizationMixin:
     ) -> bool:
         """
         Check if a user is authorized to use the bot.
-        
+
         Checks in order:
         1. Per-platform allow-all flag (e.g., DISCORD_ALLOW_ALL_USERS=true)
         2. Environment variable allowlists (TELEGRAM_ALLOWED_USERS, etc.)
@@ -400,6 +411,7 @@ class GatewayAuthorizationMixin:
         5. Default: deny
         """
         from gateway.run import logger
+
         # Home Assistant events are system-generated (state changes), not
         # user-initiated messages.  The HASS_TOKEN already authenticates the
         # connection, so HA events are always authorized.
@@ -483,7 +495,9 @@ class GatewayAuthorizationMixin:
             try:
                 adapter = self._adapter_for_source(source)
                 if adapter is not None:
-                    extra = getattr(getattr(adapter, "config", None), "extra", None) or {}
+                    extra = (
+                        getattr(getattr(adapter, "config", None), "extra", None) or {}
+                    )
                     adapter_group_allowed = extra.get("group_allowed_chats")
                     if adapter_group_allowed:
                         allowed = _coerce_allow_set(adapter_group_allowed)
@@ -506,7 +520,9 @@ class GatewayAuthorizationMixin:
         }
         if getattr(source, "is_bot", False):
             allow_bots_var = platform_allow_bots_map.get(source.platform)
-            if allow_bots_var and _platform_gate_env(allow_bots_var, "none").lower().strip() in {"mentions", "all"}:
+            if allow_bots_var and _platform_gate_env(
+                allow_bots_var, "none"
+            ).lower().strip() in {"mentions", "all"}:
                 return True
 
         if not user_id:
@@ -576,7 +592,11 @@ class GatewayAuthorizationMixin:
 
         # Per-platform allow-all flag (e.g., DISCORD_ALLOW_ALL_USERS=true)
         platform_allow_all_var = platform_allow_all_map.get(source.platform, "")
-        if platform_allow_all_var and _auth_env(platform_allow_all_var).lower() in {"true", "1", "yes"}:
+        if platform_allow_all_var and _auth_env(platform_allow_all_var).lower() in {
+            "true",
+            "1",
+            "yes",
+        }:
             return True
 
         # Adapter-verified role auth: the Discord adapter already confirmed the
@@ -606,7 +626,9 @@ class GatewayAuthorizationMixin:
         # the source has no profile or the profile isn't registered.
         platform_name = source.platform.value if source.platform else ""
         pairing_store = self._pairing_store_for(source)
-        if pairing_store is not None and pairing_store.is_approved(platform_name, user_id):
+        if pairing_store is not None and pairing_store.is_approved(
+            platform_name, user_id
+        ):
             return True
 
         # Check platform-specific and global allowlists
@@ -614,11 +636,20 @@ class GatewayAuthorizationMixin:
         group_user_allowlist = ""
         group_chat_allowlist = ""
         if source.chat_type in {"group", "forum"}:
-            group_user_allowlist = _auth_env(platform_group_user_env_map.get(source.platform, ""))
-            group_chat_allowlist = _auth_env(platform_group_chat_env_map.get(source.platform, ""))
+            group_user_allowlist = _auth_env(
+                platform_group_user_env_map.get(source.platform, "")
+            )
+            group_chat_allowlist = _auth_env(
+                platform_group_chat_env_map.get(source.platform, "")
+            )
         global_allowlist = _auth_env("GATEWAY_ALLOWED_USERS")
 
-        if not platform_allowlist and not group_user_allowlist and not group_chat_allowlist and not global_allowlist:
+        if (
+            not platform_allowlist
+            and not group_user_allowlist
+            and not group_chat_allowlist
+            and not global_allowlist
+        ):
             # No env allowlist configured. Adapters that own their own
             # config-driven access policy (dm_policy / group_policy /
             # allow_from / group_allow_from) gate access at intake, so for those
@@ -705,9 +736,15 @@ class GatewayAuthorizationMixin:
         # Telegram can optionally authorize group traffic by chat ID.
         # Keep this separate from TELEGRAM_GROUP_ALLOWED_USERS, which gates
         # the sender user ID for group/forum messages.
-        if group_chat_allowlist and source.chat_type in {"group", "forum"} and source.chat_id:
+        if (
+            group_chat_allowlist
+            and source.chat_type in {"group", "forum"}
+            and source.chat_id
+        ):
             allowed_group_ids = {
-                chat_id.strip() for chat_id in group_chat_allowlist.split(",") if chat_id.strip()
+                chat_id.strip()
+                for chat_id in group_chat_allowlist.split(",")
+                if chat_id.strip()
             }
             if "*" in allowed_group_ids or source.chat_id in allowed_group_ids:
                 return True
@@ -748,11 +785,17 @@ class GatewayAuthorizationMixin:
         # allowlist and still works everywhere for backward compatibility.
         allowed_ids = set()
         if platform_allowlist:
-            allowed_ids.update(uid.strip() for uid in platform_allowlist.split(",") if uid.strip())
+            allowed_ids.update(
+                uid.strip() for uid in platform_allowlist.split(",") if uid.strip()
+            )
         if group_user_allowlist:
-            allowed_ids.update(uid.strip() for uid in group_user_allowlist.split(",") if uid.strip())
+            allowed_ids.update(
+                uid.strip() for uid in group_user_allowlist.split(",") if uid.strip()
+            )
         if global_allowlist:
-            allowed_ids.update(uid.strip() for uid in global_allowlist.split(",") if uid.strip())
+            allowed_ids.update(
+                uid.strip() for uid in global_allowlist.split(",") if uid.strip()
+            )
 
         # "*" in any allowlist means allow everyone (consistent with
         # SIGNAL_GROUP_ALLOWED_USERS precedent)
@@ -822,8 +865,12 @@ class GatewayAuthorizationMixin:
 
         # Check for an explicit per-platform override first.
         if config and hasattr(config, "get_unauthorized_dm_behavior") and platform:
-            platform_cfg = config.platforms.get(platform) if hasattr(config, "platforms") else None
-            if platform_cfg and "unauthorized_dm_behavior" in getattr(platform_cfg, "extra", {}):
+            platform_cfg = (
+                config.platforms.get(platform) if hasattr(config, "platforms") else None
+            )
+            if platform_cfg and "unauthorized_dm_behavior" in getattr(
+                platform_cfg, "extra", {}
+            ):
                 # Operator explicitly configured behavior for this platform — respect it.
                 return config.get_unauthorized_dm_behavior(platform)
 
@@ -837,7 +884,9 @@ class GatewayAuthorizationMixin:
 
         # Check for an explicit global config override.
         if config and hasattr(config, "unauthorized_dm_behavior"):
-            if config.unauthorized_dm_behavior != "pair":  # non-default → explicit override
+            if (
+                config.unauthorized_dm_behavior != "pair"
+            ):  # non-default → explicit override
                 return config.unauthorized_dm_behavior
 
         # Config-driven dm_policy (WeCom / Weixin / Yuanbao / QQBot). An
@@ -864,22 +913,22 @@ class GatewayAuthorizationMixin:
         if platform:
             platform_env_map = {
                 Platform.TELEGRAM: "TELEGRAM_ALLOWED_USERS",
-                Platform.DISCORD:  "DISCORD_ALLOWED_USERS",
+                Platform.DISCORD: "DISCORD_ALLOWED_USERS",
                 Platform.WHATSAPP: "WHATSAPP_ALLOWED_USERS",
                 Platform.WHATSAPP_CLOUD: "WHATSAPP_CLOUD_ALLOWED_USERS",
-                Platform.SLACK:    "SLACK_ALLOWED_USERS",
-                Platform.SIGNAL:   "SIGNAL_ALLOWED_USERS",
-                Platform.EMAIL:    "EMAIL_ALLOWED_USERS",
-                Platform.SMS:      "SMS_ALLOWED_USERS",
+                Platform.SLACK: "SLACK_ALLOWED_USERS",
+                Platform.SIGNAL: "SIGNAL_ALLOWED_USERS",
+                Platform.EMAIL: "EMAIL_ALLOWED_USERS",
+                Platform.SMS: "SMS_ALLOWED_USERS",
                 Platform.MATTERMOST: "MATTERMOST_ALLOWED_USERS",
-                Platform.MATRIX:   "MATRIX_ALLOWED_USERS",
+                Platform.MATRIX: "MATRIX_ALLOWED_USERS",
                 Platform.DINGTALK: "DINGTALK_ALLOWED_USERS",
-                Platform.FEISHU:   "FEISHU_ALLOWED_USERS",
-                Platform.WECOM:    "WECOM_ALLOWED_USERS",
+                Platform.FEISHU: "FEISHU_ALLOWED_USERS",
+                Platform.WECOM: "WECOM_ALLOWED_USERS",
                 Platform.WECOM_CALLBACK: "WECOM_CALLBACK_ALLOWED_USERS",
-                Platform.WEIXIN:   "WEIXIN_ALLOWED_USERS",
+                Platform.WEIXIN: "WEIXIN_ALLOWED_USERS",
                 Platform.BLUEBUBBLES: "BLUEBUBBLES_ALLOWED_USERS",
-                Platform.QQBOT:    "QQ_ALLOWED_USERS",
+                Platform.QQBOT: "QQ_ALLOWED_USERS",
             }
             platform_group_env_map = {
                 Platform.TELEGRAM: (
