@@ -698,7 +698,7 @@ registry.register(
             "Call yb_search_sticker first if you don't know the sticker_id/name. "
             "Sticker = 贴纸 = TIM face — NOT a message reaction. "
             "CRITICAL: Whenever the user asks you to send a sticker / 贴纸 / 表情包, you MUST "
-            "use this tool. DO NOT draw a PNG via execute_code / Pillow / matplotlib and "
+            "use this tool. DO NOT draw a PNG via code execution (Pillow / matplotlib) and "
             "then call send_image_file — that produces a fake 'sticker' image instead of a "
             "real TIM face and is the WRONG path. If no suitable sticker_id is known, call "
             "yb_search_sticker first. When the recent thread shows users sending stickers, "

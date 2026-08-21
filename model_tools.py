@@ -559,25 +559,45 @@ def _compute_tool_definitions(
                         filtered_tools[i] = {"type": "function", "function": dynamic}
                         break
 
-    # Strip web tool cross-references from browser_navigate description when
-    # web_search / web_extract are not available.  The static schema says
-    # "prefer web_search or web_extract" which causes the model to hallucinate
-    # those tools when they're missing.
+    # Strip cross-tool references from schema descriptions when the referenced
+    # tools are not available in this session (#15). Stripping is PER-TOOL so
+    # partial availability (e.g. web_search enabled but web_extract not) does
+    # not leave hallucinatable mentions behind.
     if "browser_navigate" in available_tool_names:
-        web_tools_available = {"web_search", "web_extract"} & available_tool_names
-        if not web_tools_available:
-            for i, td in enumerate(filtered_tools):
-                if td.get("function", {}).get("name") == "browser_navigate":
-                    desc = td["function"].get("description", "")
-                    desc = desc.replace(
-                        " For simple information retrieval, prefer web_search or web_extract (faster, cheaper).",
-                        "",
-                    )
-                    filtered_tools[i] = {
-                        "type": "function",
-                        "function": {**td["function"], "description": desc},
-                    }
-                    break
+        for i, td in enumerate(filtered_tools):
+            if td.get("function", {}).get("name") == "browser_navigate":
+                desc = td["function"].get("description", "")
+                desc = _strip_web_tool_refs(desc, available_tool_names)
+                filtered_tools[i] = {
+                    "type": "function",
+                    "function": {**td["function"], "description": desc},
+                }
+                break
+
+    # browser_cdp's description names web_extract for docs lookup — reword to
+    # capability language when web_extract is absent (#15).
+    if "browser_cdp" in available_tool_names and "web_extract" not in available_tool_names:
+        try:
+            from tools.browser_cdp_tool import CDP_DOCS_URL
+        except Exception:
+            CDP_DOCS_URL = ""
+        for i, td in enumerate(filtered_tools):
+            if td.get("function", {}).get("name") == "browser_cdp":
+                desc = td["function"].get("description", "")
+                desc = desc.replace(
+                    f"**CDP method reference:** {CDP_DOCS_URL} — use web_extract on a "
+                    "method's URL (e.g. '/tot/Page/#method-handleJavaScriptDialog') "
+                    "to look up parameters and return shape.",
+                    f"**CDP method reference:** {CDP_DOCS_URL} — look up a method's "
+                    "URL (e.g. '/tot/Page/#method-handleJavaScriptDialog') with an "
+                    "available web-content fetch capability for parameters and "
+                    "return shape.",
+                )
+                filtered_tools[i] = {
+                    "type": "function",
+                    "function": {**td["function"], "description": desc},
+                }
+                break
 
     # browser_exec (Browser Use mode) runs arbitrary Python on the host via
     # the browser-use CLI subprocess.  A session whose toolset selection
@@ -657,6 +677,51 @@ def _compute_tool_definitions(
 
     return filtered_tools
 
+
+
+
+
+def _strip_web_tool_refs(desc: str, available_tool_names: set) -> str:
+    """Strip/narrow cross-tool mentions in browser_navigate's description per
+    availability (#15): a tool absent from this session must never be named."""
+    ws = "web_search" in available_tool_names
+    we = "web_extract" in available_tool_names
+    term = "terminal" in available_tool_names
+
+    # Sentence 1: "prefer web_search or web_extract (faster, cheaper)."
+    if ws and we:
+        pass
+    elif not ws and not we:
+        desc = desc.replace(
+            " For simple information retrieval, prefer web_search or web_extract (faster, cheaper).",
+            "",
+        )
+    elif ws:
+        desc = desc.replace("prefer web_search or web_extract", "prefer web_search")
+    else:
+        desc = desc.replace("prefer web_search or web_extract", "prefer web_extract")
+
+    # Sentence 2: "prefer curl via the terminal tool or web_extract; ..."
+    curl_sentence = (
+        " For plain-text endpoints — URLs ending in .md, .txt, .json, .yaml, "
+        ".yml, .csv, .xml, raw.githubusercontent.com, or any documented API "
+        "endpoint — prefer curl via the terminal tool or web_extract; the "
+        "browser stack is overkill and much slower for these."
+    )
+    if we and term:
+        pass
+    elif we and not term:
+        desc = desc.replace(
+            "prefer curl via the terminal tool or web_extract", "prefer web_extract"
+        )
+    elif term and not we:
+        desc = desc.replace(
+            "prefer curl via the terminal tool or web_extract",
+            "prefer curl via the terminal tool",
+        )
+    else:
+        desc = desc.replace(curl_sentence, "")
+    return desc
 
 def _resolve_active_context_length() -> int:
     """Look up the active model's context length for the tool-search gate.
