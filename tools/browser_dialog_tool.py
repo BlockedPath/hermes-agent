@@ -135,7 +135,7 @@ def _browser_dialog_check() -> bool:
 
 registry.register(
     name="browser_dialog",
-    toolset="browser-cdp",
+    toolset="browser",
     schema=BROWSER_DIALOG_SCHEMA,
     handler=lambda args, **kw: browser_dialog(
         action=args.get("action", ""),

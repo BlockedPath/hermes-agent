@@ -819,7 +819,7 @@ from tools.registry import registry
 
 registry.register(
     name="browser_exec",
-    toolset="browser-use",
+    toolset="browser",
     schema=BROWSER_EXEC_SCHEMA,
     handler=lambda args, **kw: browser_exec(
         code=args.get("code", ""),
