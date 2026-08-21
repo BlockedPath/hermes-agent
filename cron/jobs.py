@@ -1186,14 +1186,22 @@ def get_ticker_success_age() -> Optional[float]:
 
 
 def record_catch_up_occurrence() -> None:
-    """Increment the profile-local stale-schedule catch-up counter, best effort."""
+    """Increment the profile-local stale-schedule catch-up counter, best effort.
+
+    The read-modify-write is serialized by ``_jobs_lock()`` so concurrent
+    scheduler processes (gateway tick + standalone ``hermes cron run``)
+    cannot both read N and write N+1, losing an increment (#23). The lock is
+    short (one counter file) and the caller holds no jobs lock, so blocking
+    acquisition resolves in milliseconds.
+    """
     path = _current_cron_store().cron_dir / "catch_up_occurrences"
     try:
-        try:
-            value = int(path.read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
-            value = 0
-        _atomic_write_counter(path, max(0, value) + 1)
+        with _jobs_lock():
+            try:
+                value = int(path.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                value = 0
+            _atomic_write_counter(path, max(0, value) + 1)
     except Exception:
         pass
 
