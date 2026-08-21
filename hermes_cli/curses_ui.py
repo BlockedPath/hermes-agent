@@ -4,11 +4,14 @@ Used by `hermes tools` and `hermes skills` for interactive checklists.
 Provides a curses multi-select with keyboard navigation, plus a
 text-based numbered fallback for terminals without curses support.
 """
+import logging
 import sys
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Set, Tuple, Union
 
 from hermes_cli.colors import Colors, color
+
+logger = logging.getLogger(__name__)
 
 # Rich radiolist rows: (text, style). style is None | "yellow" | "dim".
 # Plain ``str`` items remain fully supported.
@@ -620,6 +623,10 @@ def _run_curses_menu(
     except KeyboardInterrupt:
         return cancel_value
     except Exception:
+        # A silent fallback() here masks real bugs (bad handler code, data
+        # shape changes) as "user cancelled" (#36). Log with traceback, then
+        # degrade to the fallback so the menu still yields a value.
+        logger.exception("menu callback failed; using fallback")
         return fallback()
 
 

@@ -5727,9 +5727,13 @@ def start_background_plugin_discovery() -> None:
     """
     global _background_discovery_thread
     manager = get_plugin_manager()
-    if manager._discovered:
-        return
+    # Both idempotence checks happen INSIDE the lock: checking
+    # ``manager._discovered`` outside it raced a concurrent synchronous
+    # discover_plugins() completing between the check and thread spawn,
+    # double-loading the registry (#36).
     with _background_discovery_lock:
+        if manager._discovered:
+            return
         if _background_discovery_thread is not None and _background_discovery_thread.is_alive():
             return
 
