@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hermes_constants import get_hermes_home
 from tools.approval import (
     _bash_exec_payload,
     _deobfuscate_shell_word_for_detection,
@@ -743,6 +744,7 @@ def _block_message(operation: str, root: Path) -> str:
 
 def _scratch_dir_hint() -> str:
     """Disk-backed scratch location suggested to agents for temporary clones."""
-    hermes_home = os.environ.get("HERMES_HOME", "").strip()
-    base = Path(hermes_home).expanduser() if hermes_home else Path.home() / ".hermes"
-    return str(base / "scratch")
+    # get_hermes_home() honors the context-local override (multiplex
+    # per-turn scoping) and the profile-aware env resolution — never read
+    # raw HERMES_HOME or fall back to Path.home() here (#10).
+    return str(get_hermes_home() / "scratch")
