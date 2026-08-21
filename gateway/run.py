@@ -21670,6 +21670,25 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if msg and source is not None:
             await self._defer_goal_status_notice_after_delivery(source, msg)
 
+    def _delivery_adapter_for(self, platform_name: str):
+        """Resolve a logical platform name to its live delivery adapter.
+
+        Relay-aware (#12): a relay-fronted gateway registers ONE
+        ``Platform.RELAY`` adapter that fronts N logical platforms, so the
+        historical literal ``self.adapters`` scan returned None for e.g.
+        "slack" even though slack is deliverable — silently dropping
+        background-process notifications and /loop wakeups. Uses the same
+        shared resolver as normal delivery (native adapter wins; relay
+        eligible only when its authenticated transport fronts the platform).
+        Returns None when the platform is unknown or not live.
+        """
+        try:
+            platform = Platform(platform_name)
+        except ValueError:
+            return None
+        transport = resolve_delivery_transport(platform, self.config, self.adapters)
+        return transport.adapter if transport else None
+
     async def _loop_wakeup_watcher(self, interval: float = 15.0) -> None:
         """Fire due /loop wakeups for idle gateway sessions.
 
@@ -21710,11 +21729,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     if not platform_name or not chat_id:
                         # CLI / TUI-owned loop — their own schedulers drive it.
                         continue
-                    adapter = None
-                    for p, a in self.adapters.items():
-                        if p.value == platform_name:
-                            adapter = a
-                            break
+                    adapter = self._delivery_adapter_for(platform_name)
                     if adapter is None:
                         if sid not in warned_no_route:
                             warned_no_route.add(sid)
@@ -26002,11 +26017,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             f"[Background process {session_id} finished with exit code {session.exit_code}~ "
                             f"Here's the final output:\n{new_output}]"
                         )
-                    adapter = None
-                    for p, a in self.adapters.items():
-                        if p.value == platform_name:
-                            adapter = a
-                            break
+                    adapter = self._delivery_adapter_for(platform_name)
                     if adapter and chat_id:
                         try:
                             send_meta = {"thread_id": thread_id} if thread_id else None
@@ -26033,11 +26044,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     f"[Background process {session_id} is still running~ "
                     f"New output:\n{new_output}]"
                 )
-                adapter = None
-                for p, a in self.adapters.items():
-                    if p.value == platform_name:
-                        adapter = a
-                        break
+                adapter = self._delivery_adapter_for(platform_name)
                 if adapter and chat_id:
                     try:
                         send_meta = {"thread_id": thread_id} if thread_id else None
