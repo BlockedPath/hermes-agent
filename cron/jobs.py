@@ -2127,7 +2127,14 @@ def list_jobs(include_disabled: bool = False) -> List[Dict[str, Any]]:
 
 
 def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Update a job by ID, refreshing derived schedule fields when needed."""
+    """Update a job by ID, refreshing derived schedule fields when needed.
+
+    Normalization must not mutate the caller's dict: programmatic callers
+    (retry loops, batch edits) reuse their updates dict across calls (#24).
+    """
+    # Copy once at entry so normalization below (workdir/monitor/
+    # reasoning_effort rewrites) never mutates the caller's dict.
+    updates = dict(updates or {})
     # Block mutation of immutable fields. ``id`` in particular is a filesystem
     # path component under OUTPUT_DIR — letting an update change it leaks
     # path-escape values into output writes/deletes.
