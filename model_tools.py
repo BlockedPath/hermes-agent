@@ -217,6 +217,8 @@ def _run_async(coro):
     # lifetime — preventing "Event loop is closed" on GC cleanup.
     if threading.current_thread() is not threading.main_thread():
         worker_loop = _get_worker_loop()
+        if worker_loop is None:  # pragma: no cover — defensive
+            raise RuntimeError("worker event loop not initialized")
         return worker_loop.run_until_complete(coro)
 
     tool_loop = _get_tool_loop()
@@ -521,7 +523,7 @@ def _compute_tool_definitions(
     # disabled (#560-discord).
     if "execute_code" in available_tool_names:
         from tools.code_execution_tool import SANDBOX_ALLOWED_TOOLS, build_execute_code_schema, _get_execution_mode
-        sandbox_enabled = SANDBOX_ALLOWED_TOOLS & available_tool_names
+        sandbox_enabled = set(SANDBOX_ALLOWED_TOOLS & available_tool_names)
         dynamic_schema = build_execute_code_schema(sandbox_enabled, mode=_get_execution_mode())
         for i, td in enumerate(filtered_tools):
             if td.get("function", {}).get("name") == "execute_code":
@@ -599,9 +601,6 @@ def _compute_tool_definitions(
         else:
             print("🛠️  No tools selected (all filtered out or unavailable)")
 
-    global _last_resolved_tool_names
-    _last_resolved_tool_names = [t["function"]["name"] for t in filtered_tools]
-
     # Sanitize schemas for broad backend compatibility. llama.cpp's
     # json-schema-to-grammar converter (used by its OAI server to build
     # GBNF tool-call parsers) rejects some shapes that cloud providers
@@ -648,6 +647,13 @@ def _compute_tool_definitions(
             filtered_tools = assembly.tool_defs
     except Exception as e:  # pragma: no cover — never break tool loading
         logger.warning("Tool search assembly skipped: %s", e)
+
+    # Record POST-assembly names (after sanitization + tool-search bridging) so
+    # the compute path agrees with the cache-hit path, which assigns from the
+    # cached post-assembly result (#16). Consumers like execute_code's sandbox
+    # enumeration must see the same tool universe regardless of memo warmth.
+    global _last_resolved_tool_names
+    _last_resolved_tool_names = [t["function"]["name"] for t in filtered_tools]
 
     return filtered_tools
 
