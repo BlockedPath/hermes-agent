@@ -1433,8 +1433,25 @@ def _is_anthropic_compatible_host(url: str) -> bool:
 
 
 def _nous_min_key_ttl_seconds() -> int:
+    # Layered like HERMES_OPENROUTER_CACHE: config.yaml
+    # auxiliary.nous_min_key_ttl_seconds is the documented surface; the env
+    # var remains an operator escape hatch layered on top (#26).
+    configured = None
     try:
-        return max(60, int(os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800")))
+        from hermes_cli.config import load_config
+
+        configured = load_config().get("auxiliary", {}).get(
+            "nous_min_key_ttl_seconds"
+        )
+    except Exception:
+        configured = None
+    raw = (
+        os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "").strip()
+        or (str(configured) if configured is not None else "")
+        or "1800"
+    )
+    try:
+        return max(60, int(raw))
     except (TypeError, ValueError):
         return 1800
 
