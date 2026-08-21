@@ -132,16 +132,34 @@ _GLOBAL_ENV_EXACT = frozenset({
     "GATEWAY_RELAY_ROUTE_KEYS", "GATEWAY_RELAY_INSTANCE_ID",
     "GATEWAY_RELAY_WAKE_URL", "GATEWAY_RELAY_DISPLAY_NAME",
 })
+# Explicit knob names (NOT prefixes): a prefix wildcard here is one naming
+# collision away from silently routing a future HERMES_TELEGRAM_* credential
+# past the fail-closed scope (#25). New tuning knobs must be added to this
+# frozenset explicitly.
+_GLOBAL_ENV_TELEGRAM_KNOBS = frozenset({
+    "HERMES_TELEGRAM_DISABLE_FALLBACK_IPS",
+    "HERMES_TELEGRAM_FALLBACK_DISCOVERY_TIMEOUT",
+    "HERMES_TELEGRAM_FOLLOWUP_GRACE_SECONDS",
+    "HERMES_TELEGRAM_HTTP_CONNECT_TIMEOUT",
+    "HERMES_TELEGRAM_HTTP_POOL_SIZE",
+    "HERMES_TELEGRAM_HTTP_POOL_TIMEOUT",
+    "HERMES_TELEGRAM_HTTP_READ_TIMEOUT",
+    "HERMES_TELEGRAM_HTTP_WRITE_TIMEOUT",
+    "HERMES_TELEGRAM_INIT_TIMEOUT",
+    "HERMES_TELEGRAM_MEDIA_BATCH_DELAY_SECONDS",
+    "HERMES_TELEGRAM_NOTIFICATIONS",
+    "HERMES_TELEGRAM_TEXT_BATCH_DELAY_SECONDS",
+    "HERMES_TELEGRAM_TEXT_BATCH_SPLIT_DELAY_SECONDS",
+})
 _GLOBAL_ENV_PREFIXES = (
     "HERMES_KANBAN_",
-    "HERMES_TELEGRAM_",   # tuning knobs (batch delays, fallback toggles) — NOT the token
     "TERMINAL_",          # terminal/sandbox backend settings
 )
 
 
 def _is_global_env(name: str) -> bool:
     """Return True for genuinely process-global (non-profile-secret) env vars."""
-    if name in _GLOBAL_ENV_EXACT:
+    if name in _GLOBAL_ENV_EXACT or name in _GLOBAL_ENV_TELEGRAM_KNOBS:
         return True
     return any(name.startswith(p) for p in _GLOBAL_ENV_PREFIXES)
 
