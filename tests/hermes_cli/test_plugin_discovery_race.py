@@ -70,11 +70,17 @@ def test_concurrent_starts_spawn_at_most_one_thread(tmp_path, monkeypatch):
     class _TrackingThread(real_thread):
         def __init__(self, *a, **kw):
             super().__init__(*a, **kw)
+            self._started = False
             with lock:
                 spawned.append(self)
 
         def start(self):
-            pass
+            # Mirror production semantics: once started, the discovery
+            # thread IS alive (or has finished and set _discovered).
+            self._started = True
+
+        def is_alive(self):
+            return self._started
 
     monkeypatch.setattr(manager, "_discovered", False)
     monkeypatch.setattr(plugins_mod, "_background_discovery_thread", None)
@@ -109,6 +115,10 @@ def test_menu_callback_exception_is_logged_not_swallowed(caplog, monkeypatch):
     fake_curses = types.ModuleType("curses")
     fake_curses.wrapper = _RaisingWrapper()
     monkeypatch.setitem(sys.modules, "curses", fake_curses)
+
+    import sys as _sys
+
+    monkeypatch.setattr(_sys.stdin, "isatty", lambda: True)
     fallback_called = []
 
     with caplog.at_level(logging.ERROR):
