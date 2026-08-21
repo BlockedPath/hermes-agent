@@ -2563,10 +2563,6 @@ def _(rid, params: dict) -> dict:
     agent = session.get("agent")
     meta = {}
     # Prefer the live session's bound profile db, else params.profile, else launch.
-    status_params = dict(params or {})
-    if not status_params.get("profile") and session.get("profile_home"):
-        # profile_home is a path; still allow _session_db via a synthetic session
-        pass
     with _session_db(session) as db:
         if db is None:
             # Fall back to ~params.profile naming for not-yet-mapped sessions.
