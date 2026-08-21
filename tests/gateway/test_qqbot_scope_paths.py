@@ -67,8 +67,8 @@ def _make_qq_runner():
         _dm_policy="open",
         _group_policy="open",
     )
-    runner.adapters = {Platform.QQBOT: default_adapter}
-    runner._profile_adapters = {"coder": {Platform.QQBOT: secondary_adapter}}
+    runner.adapters = {Platform.QQBOT: default_adapter}  # type: ignore[assignment]
+    runner._profile_adapters = {"coder": {Platform.QQBOT: secondary_adapter}}  # type: ignore[assignment]
     runner.pairing_store = MagicMock()
     runner.pairing_store.is_approved.return_value = False
     return runner
@@ -219,7 +219,7 @@ class TestDirectSendScope:
                 return _Resp()
 
         module = types.ModuleType("httpx")
-        module.AsyncClient = _AsyncClient
+        setattr(module, "AsyncClient", _AsyncClient)
         return module
 
     @pytest.mark.asyncio
