@@ -74,7 +74,7 @@ def _make_qq_runner():
     return runner
 
 
-def _qq_dm_source(profile="coder"):
+def _qq_dm_source(profile: "str | None" = "coder"):
     return SessionSource(
         platform=Platform.QQBOT,
         user_id="user-1",
