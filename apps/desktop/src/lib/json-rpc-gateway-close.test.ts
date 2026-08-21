@@ -40,8 +40,10 @@ describe('JsonRpcGatewayClient close() during connecting (#19)', () => {
     })
 
     let rejection: Error | null = null
+
     const pending = client.connect('ws://127.0.0.1:1234/api/ws').catch((e: Error) => {
       rejection = e
+
       return undefined
     })
 
@@ -56,10 +58,12 @@ describe('JsonRpcGatewayClient close() during connecting (#19)', () => {
 
   it('does not flap closed→error when the handshake timer later fires', async () => {
     const states: string[] = []
+
     const client = new JsonRpcGatewayClient({
       socketFactory: () => new NeverOpeningSocket() as unknown as WebSocket,
       connectTimeoutMs: 60_000
     })
+
     client.onState(s => states.push(s))
 
     const pending = client.connect('ws://127.0.0.1:1234/api/ws').catch(() => undefined)
@@ -80,6 +84,7 @@ describe('JsonRpcGatewayClient close() during connecting (#19)', () => {
 
   it('clears the handshake timer (no post-close timer work)', async () => {
     const socket = new NeverOpeningSocket()
+
     const client = new JsonRpcGatewayClient({
       socketFactory: () => socket as unknown as WebSocket,
       connectTimeoutMs: 60_000
@@ -99,6 +104,7 @@ describe('JsonRpcGatewayClient close() during connecting (#19)', () => {
     const first = new NeverOpeningSocket()
     const second = new NeverOpeningSocket()
     const sockets = [first, second]
+
     const client = new JsonRpcGatewayClient({
       socketFactory: () => (sockets.shift() ?? new NeverOpeningSocket()) as unknown as WebSocket,
       connectTimeoutMs: 60_000
@@ -109,10 +115,12 @@ describe('JsonRpcGatewayClient close() during connecting (#19)', () => {
     await stale
 
     const reopened = client.connect('ws://127.0.0.1:1234/api/ws')
+
     // Open the second socket manually.
     for (const handler of second.openHandlers) {
       handler()
     }
+
     await expect(reopened).resolves.toBeUndefined()
     expect(client.connectionState).toBe('open')
   })

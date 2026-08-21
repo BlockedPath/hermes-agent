@@ -191,6 +191,7 @@ export class JsonRpcGatewayClient {
 
         socket.removeEventListener('open', onOpen)
         socket.removeEventListener('error', onError)
+
         if (this.abortConnect) {
           this.abortConnect = null
         }
