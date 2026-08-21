@@ -201,3 +201,44 @@ class TestArgparseFlagsRegistered:
         assert args.ignore_user_config is True
         assert args.ignore_rules is True
 
+
+
+class TestSharedLoaderHonorsIgnoreFlag:
+    """Regression for F-CLIC-1: the SHARED loader (hermes_cli.config.load_config)
+    must honor HERMES_IGNORE_USER_CONFIG — not just load_cli_config().
+
+    Before the fix, _load_config_impl() merged user config.yaml unconditionally,
+    so MCP/hook/webhook discovery and interface resolution consumed user state
+    even under --ignore-user-config / --safe-mode.
+    """
+
+    def _write_user_config(self, monkeypatch, tmp_path):
+        hermes_home = tmp_path / "home"
+        hermes_home.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        (hermes_home / "config.yaml").write_text(
+            "agent:\n"
+            '  system_prompt: "USER-CONFIG-SENTINEL-PROMPT"\n'
+        )
+        return hermes_home
+
+    def _fresh_load_config(self, monkeypatch):
+        import hermes_cli.config as cfg_mod
+        monkeypatch.setattr(cfg_mod, "_LAST_EXPANDED_CONFIG_BY_PATH", {})
+        return cfg_mod.load_config
+
+    def test_load_config_skips_user_yaml_when_flag_set(self, tmp_path, monkeypatch):
+        self._write_user_config(monkeypatch, tmp_path)
+        monkeypatch.setenv("HERMES_IGNORE_USER_CONFIG", "1")
+        load_config = self._fresh_load_config(monkeypatch)
+
+        cfg = load_config()
+        assert cfg["agent"].get("system_prompt", "") != "USER-CONFIG-SENTINEL-PROMPT"
+
+    def test_load_config_reads_user_yaml_when_flag_unset(self, tmp_path, monkeypatch):
+        self._write_user_config(monkeypatch, tmp_path)
+        monkeypatch.delenv("HERMES_IGNORE_USER_CONFIG", raising=False)
+        load_config = self._fresh_load_config(monkeypatch)
+
+        cfg = load_config()
+        assert cfg["agent"].get("system_prompt") == "USER-CONFIG-SENTINEL-PROMPT"
