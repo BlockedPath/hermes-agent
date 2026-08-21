@@ -74,24 +74,34 @@ _debug = DebugSession("vision_tools", env_var="VISION_TOOLS_DEBUG")
 # Configurable HTTP download timeout for _download_image().
 # Separate from auxiliary.vision.timeout which governs the LLM API call.
 # Resolution: config.yaml auxiliary.vision.download_timeout → env var → 30s default.
+# Resolved lazily at each download so config edits apply without a restart
+# (#18) — no import-time freeze.
 def _resolve_download_timeout() -> float:
+    try:
+        from hermes_cli.config import cfg_get, load_config
+        from hermes_cli.config_defaults import DEFAULT_CONFIG
+        cfg = load_config()
+        val = cfg_get(cfg, "auxiliary", "vision", "download_timeout")
+        # load_config() deep-merges DEFAULT_CONFIG, so an unconfigured install
+        # still reports the built-in default here. Only treat the key as
+        # operator-configured when it differs from that default — otherwise
+        # the env escape hatch could never fire (#18).
+        default_val = (
+            DEFAULT_CONFIG.get("auxiliary", {})
+            .get("vision", {})
+            .get("download_timeout")
+        )
+        if val is not None and val != default_val:
+            return float(val)
+    except Exception:
+        pass
     env_val = os.getenv("HERMES_VISION_DOWNLOAD_TIMEOUT", "").strip()
     if env_val:
         try:
             return float(env_val)
         except ValueError:
             pass
-    try:
-        from hermes_cli.config import cfg_get, load_config
-        cfg = load_config()
-        val = cfg_get(cfg, "auxiliary", "vision", "download_timeout")
-        if val is not None:
-            return float(val)
-    except Exception:
-        pass
     return 30.0
-
-_VISION_DOWNLOAD_TIMEOUT = _resolve_download_timeout()
 
 # Hard cap on downloaded image file size (50 MB). Prevents OOM from
 # attacker-hosted multi-gigabyte files or decompression bombs.
@@ -525,7 +535,7 @@ async def _download_image(image_url: str, destination: Path, max_retries: int = 
             # Streaming: body is written chunk-by-chunk to a temp file so the
             # size cap bounds memory, not just disk.
             async with create_ssrf_safe_async_client(
-                timeout=_VISION_DOWNLOAD_TIMEOUT,
+                timeout=_resolve_download_timeout(),
                 follow_redirects=True,
                 event_hooks={"response": [_ssrf_redirect_guard]},
             ) as client:
