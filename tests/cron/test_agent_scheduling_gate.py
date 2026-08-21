@@ -115,3 +115,28 @@ class TestUserLayerUnchanged:
         disabled = _resolve_cron_disabled_toolsets(cfg)
         assert "browser" in disabled
         assert "" not in disabled
+
+
+class TestDenylistNamesResolve:
+    """Regression for #14: every name in cron's interactivity denylist must
+    resolve to a KNOWN toolset. 'messaging' used to be denied while absent
+    from TOOLSETS entirely — the documented 'always denied' guarantee was a
+    no-op because unknown disabled toolsets are silently ignored."""
+
+    def test_messaging_toolset_exists(self):
+        from toolsets import TOOLSETS
+
+        assert "messaging" in TOOLSETS
+        # Reserved bundle: empty today, but real — so the denial binds the
+        # moment any tool registers under toolset="messaging".
+        assert isinstance(TOOLSETS["messaging"]["tools"], list)
+
+    def test_every_denylist_name_is_a_known_toolset(self):
+        from toolsets import TOOLSETS, get_toolset
+
+        for cfg in ({}, {"cron": {"allow_agent_scheduling": True}}):
+            for name in _resolve_cron_disabled_toolsets(cfg):
+                assert name in TOOLSETS, (
+                    f"denylist name {name!r} is not a known toolset"
+                )
+                assert get_toolset(name) is not None

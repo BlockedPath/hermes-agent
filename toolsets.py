@@ -333,7 +333,21 @@ TOOLSETS = {
         "includes": [],
     },
 
-    "discord": {
+        "messaging": {
+        # Reserved interactivity bundle. No tools register under it today,
+        # but cron's interactivity denylist (cron/scheduler.py) names it as
+        # ALWAYS denied - an absent TOOLSETS key made that denial a no-op
+        # (#14). If messaging tools ever register under this toolset, the
+        # cron gate binds automatically.
+        "description": (
+            "Outbound messaging/interactivity tools "
+            "(reserved; always denied for cron agents)"
+        ),
+        "tools": [],
+        "includes": [],
+    },
+
+"discord": {
         "description": "Discord read and participate tools (fetch messages, search members, create threads)",
         "tools": ["discord"],
         "includes": [],
@@ -766,7 +780,7 @@ def bundle_non_core_tools(toolset_name: str) -> Set[str]:
 _resolve_toolset_memo: Dict[Tuple[str, bool, int, int], List[str]] = {}
 
 
-def resolve_toolset(name: str, visited: Set[str] = None, *, include_registry: bool = True) -> List[str]:
+def resolve_toolset(name: str, visited: Optional[Set[str]] = None, *, include_registry: bool = True) -> List[str]:
     """
     Recursively resolve a toolset to get all tool names.
 
@@ -994,8 +1008,8 @@ def validate_toolset(name: str) -> bool:
 def create_custom_toolset(
     name: str,
     description: str,
-    tools: List[str] = None,
-    includes: List[str] = None
+    tools: Optional[List[str]] = None,
+    includes: Optional[List[str]] = None
 ) -> None:
     """
     Create a custom toolset at runtime.
@@ -1015,7 +1029,7 @@ def create_custom_toolset(
 
 
 
-def get_toolset_info(name: str) -> Dict[str, Any]:
+def get_toolset_info(name: str) -> Optional[Dict[str, Any]]:
     """
     Get detailed information about a toolset including resolved tools.
     

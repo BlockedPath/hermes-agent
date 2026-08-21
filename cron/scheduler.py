@@ -355,7 +355,7 @@ class CronPromptInjectionBlocked(Exception):
     """
 
 
-def _resolve_cron_disabled_toolsets(cfg: dict) -> list[str]:
+def _resolve_cron_disabled_toolsets(cfg: dict | None) -> list[str]:
     """Toolsets a cron-spawned agent must never receive.
 
     Two toolsets are always disabled in cron context regardless of config:
