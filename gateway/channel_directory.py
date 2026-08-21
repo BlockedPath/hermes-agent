@@ -18,7 +18,15 @@ from utils import atomic_json_write
 
 logger = logging.getLogger(__name__)
 
-DIRECTORY_PATH = get_hermes_home() / "channel_directory.json"
+def directory_path():
+    """Resolve per call — honors the multiplex per-turn home override (#8).
+
+    An explicitly-set module DIRECTORY_PATH (tests monkeypatch it) wins.
+    """
+    override = globals().get("DIRECTORY_PATH")
+    if override is not None:
+        return override
+    return get_hermes_home() / "channel_directory.json"
 # Throttle window for repeated Slack channel-directory refresh failures.
 # The directory rebuilds on a timer, so a persistent workspace error (e.g.
 # missing scope, revoked token) would otherwise re-log the same warning on
@@ -33,14 +41,30 @@ _slack_directory_warning_last: Dict[tuple[str, str], float] = {}
 # on every build AND every load, giving durable human-friendly names (and
 # letting you pre-name a chat before it has produced any traffic).
 # Format: {"<platform>": {"<chat_id>": "<friendly name>", ...}, ...}
-CHANNEL_ALIASES_PATH = get_hermes_home() / "channel_aliases.json"
+def channel_aliases_path():
+    """Resolve per call — honors the multiplex per-turn home override (#8).
+
+    An explicitly-set module CHANNEL_ALIASES_PATH (tests) wins.
+    """
+    override = globals().get("CHANNEL_ALIASES_PATH")
+    if override is not None:
+        return override
+    return get_hermes_home() / "channel_aliases.json"
+
+
+def __getattr__(name):  # PEP 562: lazy, override-honoring back-compat aliases
+    if name == "DIRECTORY_PATH":
+        return directory_path()
+    if name == "CHANNEL_ALIASES_PATH":
+        return channel_aliases_path()
+    raise AttributeError(name)
 
 
 def _load_channel_aliases() -> Dict[str, Dict[str, str]]:
-    if not CHANNEL_ALIASES_PATH.exists():
+    if not channel_aliases_path().exists():
         return {}
     try:
-        with open(CHANNEL_ALIASES_PATH, encoding="utf-8") as f:
+        with open(channel_aliases_path(), encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except Exception:
@@ -206,7 +230,7 @@ async def build_channel_directory(adapters: Dict[Any, Any]) -> Dict[str, Any]:
     }
 
     try:
-        await asyncio.to_thread(atomic_json_write, DIRECTORY_PATH, directory)
+        await asyncio.to_thread(atomic_json_write, directory_path(), directory)
     except Exception as e:
         logger.warning("Channel directory: failed to write: %s", e)
 
@@ -525,12 +549,12 @@ def _build_from_sessions_json(platform_name: str) -> List[Dict[str, str]]:
 
 def load_directory() -> Dict[str, Any]:
     """Load the cached channel directory from disk."""
-    if not DIRECTORY_PATH.exists():
+    if not directory_path().exists():
         base = {"updated_at": None, "platforms": {}}
         _apply_channel_aliases(base["platforms"])
         return base
     try:
-        with open(DIRECTORY_PATH, encoding="utf-8") as f:
+        with open(directory_path(), encoding="utf-8") as f:
             data = json.load(f)
         # Re-apply aliases on read so friendly names take effect immediately,
         # even between timed rebuilds and for brand-new alias entries.

@@ -18,7 +18,6 @@ under the ``vertex:`` section; env vars take precedence over config.yaml.
 
 import logging
 import os
-import threading
 import time
 from typing import Optional, Tuple
 
@@ -30,6 +29,7 @@ from agent.secret_scope import get_secret as _get_secret, is_multiplex_active
 # who installed plain `hermes-agent` and only later selected a Gemini model.
 try:
     from tools.lazy_deps import ensure as _lazy_ensure
+
     _lazy_ensure("provider.vertex", prompt=False)
 except Exception:
     pass  # lazy_deps unavailable or install failed — fall through to the real ImportError below
@@ -46,10 +46,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_REGION = "global"
 
 _creds_cache: dict = {}
-# Guards check/build/refresh on _creds_cache: concurrent first calls would
-# otherwise both build service-account credentials and race google-auth token
-# refreshes (not guaranteed idempotent with rotating refresh grants) (#27).
-_creds_cache_lock = threading.Lock()
 
 
 def _vertex_config() -> dict:
@@ -113,7 +109,9 @@ def _refresh_credentials(creds) -> None:
     creds.refresh(auth_req)
 
 
-def get_vertex_credentials(credentials_path: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+def get_vertex_credentials(
+    credentials_path: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
     """Return a (fresh access_token, project_id) pair or (None, None) on failure.
 
     Caches the underlying Credentials object and refreshes it when within
@@ -127,51 +125,52 @@ def get_vertex_credentials(credentials_path: Optional[str] = None) -> Tuple[Opti
     cache_key = resolved_path or "__adc__"
 
     try:
-        with _creds_cache_lock:
-            cached = _creds_cache.get(cache_key)
-            if cached is None:
-                if resolved_path:
-                    creds = service_account.Credentials.from_service_account_file(
-                        resolved_path,
-                        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-                    )
-                    project_id = creds.project_id
-                else:
-                    # google.auth.default() reads GOOGLE_APPLICATION_CREDENTIALS
-                    # straight from os.environ internally — it has no notion of
-                    # the profile secret scope. _resolve_credentials_path already
-                    # confirmed (via get_secret) that *this* profile doesn't
-                    # define the var, but python-dotenv's load_dotenv() mutates
-                    # os.environ at boot for whichever profile happened to load
-                    # first, so a raw os.environ read here can still pick up a
-                    # different profile's service-account path. Refuse rather
-                    # than silently authenticating under a stranger's identity.
-                    if is_multiplex_active() and os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-                        logger.warning(
-                            "Vertex ADC skipped for this profile: "
-                            "GOOGLE_APPLICATION_CREDENTIALS is set in the process "
-                            "environment (from another profile's .env) but not in "
-                            "this profile's own config. Set VERTEX_CREDENTIALS_PATH "
-                            "in this profile's .env instead of relying on ADC."
-                        )
-                        return None, None
-                    creds, project_id = google.auth.default(
-                        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-                    )
-                _creds_cache[cache_key] = (creds, project_id)
-            else:
-                creds, project_id = cached
-
-            needs_refresh = (
-                not getattr(creds, "token", None)
-                or getattr(creds, "expired", False)
-                or (
-                    getattr(creds, "expiry", None) is not None
-                    and (creds.expiry.timestamp() - time.time()) < 300
+        cached = _creds_cache.get(cache_key)
+        if cached is None:
+            if resolved_path:
+                creds = service_account.Credentials.from_service_account_file(
+                    resolved_path,
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
                 )
+                project_id = creds.project_id
+            else:
+                # google.auth.default() reads GOOGLE_APPLICATION_CREDENTIALS
+                # straight from os.environ internally — it has no notion of
+                # the profile secret scope. _resolve_credentials_path already
+                # confirmed (via get_secret) that *this* profile doesn't
+                # define the var, but python-dotenv's load_dotenv() mutates
+                # os.environ at boot for whichever profile happened to load
+                # first, so a raw os.environ read here can still pick up a
+                # different profile's service-account path. Refuse rather
+                # than silently authenticating under a stranger's identity.
+                if is_multiplex_active() and os.environ.get(
+                    "GOOGLE_APPLICATION_CREDENTIALS"
+                ):
+                    logger.warning(
+                        "Vertex ADC skipped for this profile: "
+                        "GOOGLE_APPLICATION_CREDENTIALS is set in the process "
+                        "environment (from another profile's .env) but not in "
+                        "this profile's own config. Set VERTEX_CREDENTIALS_PATH "
+                        "in this profile's .env instead of relying on ADC."
+                    )
+                    return None, None
+                creds, project_id = google.auth.default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+            _creds_cache[cache_key] = (creds, project_id)
+        else:
+            creds, project_id = cached
+
+        needs_refresh = (
+            not getattr(creds, "token", None)
+            or getattr(creds, "expired", False)
+            or (
+                getattr(creds, "expiry", None) is not None
+                and (creds.expiry.timestamp() - time.time()) < 300
             )
-            if needs_refresh:
-                _refresh_credentials(creds)
+        )
+        if needs_refresh:
+            _refresh_credentials(creds)
 
         override_project = _resolve_project_override()
         if override_project:
@@ -201,7 +200,11 @@ def build_vertex_base_url(project_id: str, region: str = DEFAULT_REGION) -> str:
     Gemini 3.x preview models are only served via the global endpoint at
     the time of writing.
     """
-    host = "aiplatform.googleapis.com" if region == "global" else f"{region}-aiplatform.googleapis.com"
+    host = (
+        "aiplatform.googleapis.com"
+        if region == "global"
+        else f"{region}-aiplatform.googleapis.com"
+    )
     return f"https://{host}/v1beta1/projects/{project_id}/locations/{region}/endpoints/openapi"
 
 
