@@ -186,17 +186,15 @@ class TestArgparseFlagsRegistered:
     """
 
     def test_flags_present_in_chat_parser(self):
-        """Parse a synthetic chat invocation and check both attributes exist."""
-        # Minimal argparse tree matching the real chat subparser shape for the
-        # two flags under test. If someone removes the flag from main.py, this
-        # test keeps passing in isolation — but the E2E test below catches it.
-        import argparse
-        parser = argparse.ArgumentParser(prog="hermes")
-        subs = parser.add_subparsers(dest="command")
-        chat = subs.add_parser("chat")
-        chat.add_argument("--ignore-user-config", action="store_true", default=False)
-        chat.add_argument("--ignore-rules", action="store_true", default=False)
+        """Parse a real chat invocation through the production parser.
 
+        Exercises hermes_cli._parser.build_top_level_parser() directly so a
+        removed/renamed flag fails here instead of staying green against a
+        synthetic lookalike tree.
+        """
+        from hermes_cli._parser import build_top_level_parser
+
+        parser, _subparsers, _chat = build_top_level_parser()
         args = parser.parse_args(["chat", "--ignore-user-config", "--ignore-rules"])
         assert args.ignore_user_config is True
         assert args.ignore_rules is True

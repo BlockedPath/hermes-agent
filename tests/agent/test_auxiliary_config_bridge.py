@@ -120,44 +120,66 @@ class TestAuxiliaryConfigBridge:
 
 
 class TestGatewayBridgeCodeParity:
-    """Verify the gateway/run.py config bridge contains the auxiliary section."""
+    """Behavioral parity tests: exercise the real gateway config bridge
+    (load_gateway_config_for_runner) against an isolated HERMES_HOME and
+    assert the observable env-var outcomes — no source-text reading."""
 
-    def test_gateway_has_auxiliary_bridge(self):
-        """The gateway config bridge must include auxiliary.* bridging.
+    def test_gateway_bridges_auxiliary_tasks_to_env(self, tmp_path, monkeypatch):
+        """The gateway bridge must map auxiliary.* task configs to
+        AUXILIARY_<TASK>_{PROVIDER,MODEL,BASE_URL,API_KEY} env vars."""
+        home = tmp_path / "home"
+        home.mkdir(parents=True)
+        (home / "config.yaml").write_text(
+            "auxiliary:\n"
+            "  vision:\n"
+            "    provider: nous\n"
+            "    model: probe-vision-model\n"
+            "    base_url: https://probe.example/v1\n"
+            "    api_key: probe-vision-key\n"
+            "  web_extract:\n"
+            "    provider: openai\n"
+            "    model: probe-extract-model\n"
+        )
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        for key in (
+            "AUXILIARY_VISION_PROVIDER", "AUXILIARY_VISION_MODEL",
+            "AUXILIARY_VISION_BASE_URL", "AUXILIARY_VISION_API_KEY",
+            "AUXILIARY_WEB_EXTRACT_PROVIDER", "AUXILIARY_WEB_EXTRACT_MODEL",
+        ):
+            monkeypatch.delenv(key, raising=False)
 
-        After the plugin-aux-task API refactor (2026-05), gateway env-var
-        names are derived dynamically (``AUXILIARY_<KEY_UPPER>_*``) so the
-        literal strings ``AUXILIARY_VISION_PROVIDER`` etc. no longer appear
-        in source. Assert the dynamic shape and the canonical built-in keys
-        bridged set instead.
-        """
-        gateway_path = Path(__file__).parent.parent.parent / "gateway" / "run.py"
-        # Pin encoding to UTF-8: source files in this repo are UTF-8, but
-        # Path.read_text() defaults to the system locale — which is cp1252
-        # on most Western Windows installs and crashes as soon as the file
-        # contains any non-ASCII byte (e.g. an em-dash in a comment).
-        content = gateway_path.read_text(encoding="utf-8")
-        # Dynamic env-var derivation present
-        assert 'f"AUXILIARY_{_upper}_PROVIDER"' in content
-        assert 'f"AUXILIARY_{_upper}_MODEL"' in content
-        assert 'f"AUXILIARY_{_upper}_BASE_URL"' in content
-        assert 'f"AUXILIARY_{_upper}_API_KEY"' in content
-        # Built-in bridged keys present
-        assert "_aux_bridged_keys" in content
-        assert '"vision"' in content
-        assert '"web_extract"' in content
-        assert '"approval"' in content
-        # Plugin-aux-task discovery hooked into bridging
-        assert "get_plugin_auxiliary_tasks" in content
+        import os
 
-    def test_gateway_no_compression_env_bridge(self):
-        """Gateway should NOT bridge compression config to env vars (config-only)."""
-        gateway_path = Path(__file__).parent.parent.parent / "gateway" / "run.py"
-        # See note in test_gateway_has_auxiliary_bridge — pin UTF-8 so the
-        # test runs on Windows where the default locale is cp1252.
-        content = gateway_path.read_text(encoding="utf-8")
-        assert "CONTEXT_COMPRESSION_PROVIDER" not in content
-        assert "CONTEXT_COMPRESSION_MODEL" not in content
+        from gateway.run import load_gateway_config_for_runner
+        load_gateway_config_for_runner()
+
+        assert os.environ.get("AUXILIARY_VISION_PROVIDER") == "nous"
+        assert os.environ.get("AUXILIARY_VISION_MODEL") == "probe-vision-model"
+        assert os.environ.get("AUXILIARY_VISION_BASE_URL") == "https://probe.example/v1"
+        assert os.environ.get("AUXILIARY_VISION_API_KEY") == "probe-vision-key"
+        assert os.environ.get("AUXILIARY_WEB_EXTRACT_PROVIDER") == "openai"
+        assert os.environ.get("AUXILIARY_WEB_EXTRACT_MODEL") == "probe-extract-model"
+
+    def test_gateway_does_not_bridge_compression(self, tmp_path, monkeypatch):
+        """Compression stays config-only — no env-var bridging."""
+        home = tmp_path / "home"
+        home.mkdir(parents=True)
+        (home / "config.yaml").write_text(
+            "compression:\n"
+            "  provider: nous\n"
+            "  model: probe-compression-model\n"
+        )
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        for key in ("CONTEXT_COMPRESSION_PROVIDER", "CONTEXT_COMPRESSION_MODEL"):
+            monkeypatch.delenv(key, raising=False)
+
+        import os
+
+        from gateway.run import load_gateway_config_for_runner
+        load_gateway_config_for_runner()
+
+        assert os.environ.get("CONTEXT_COMPRESSION_PROVIDER") is None
+        assert os.environ.get("CONTEXT_COMPRESSION_MODEL") is None
 
 
 # ── Vision model override tests ──────────────────────────────────────────────
