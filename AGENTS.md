@@ -1040,11 +1040,15 @@ Each platform's adapter picks a base toolset (e.g. Telegram uses
 `"messaging"`); `_HERMES_CORE_TOOLS` is the default bundle most
 platforms inherit from.
 
-Current toolset keys: `browser`, `clarify`, `code_execution`, `cronjob`,
-`debugging`, `delegation`, `discord`, `discord_admin`, `feishu_doc`,
-`feishu_drive`, `file`, `homeassistant`, `image_gen`, `kanban`, `memory`,
-`messaging`, `moa`, `rl`, `safe`, `search`, `session_search`, `skills`,
-`spotify`, `terminal`, `todo`, `tts`, `video`, `vision`, `web`, `yuanbao`.
+Current static toolset keys: `bfl`, `browser`, `clarify`, `code_execution`,
+`coding`, `computer_use`, `context_engine`, `cronjob`, `debugging`,
+`delegation`, `desktop_ui`, `discord`, `discord_admin`, `feishu_doc`,
+`feishu_drive`, `file`, `homeassistant`, `image_gen`, `kanban`, `messaging`
+(reserved interactivity bundle — always denied for cron agents), `memory`,
+`project`, `safe`, `search`, `session_search`, `skills`, `spotify`,
+`terminal`, `todo`, `tts`, `video`, `video_gen`, `vision`, `web`, `x_search`,
+`yuanbao`. Gateway platform adapters additionally register dynamic
+`hermes-<platform>` toolsets at runtime.
 
 Enable/disable per platform via `hermes tools` (the curses UI) or the
 `tools.<platform>.enabled` / `tools.<platform>.disabled` lists in
