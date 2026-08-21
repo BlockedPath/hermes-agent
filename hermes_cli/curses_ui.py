@@ -407,31 +407,41 @@ def _decode_menu_key(stdscr, key: int) -> str:
         return NAV_CANCEL
 
     if key == 27:  # ESC — could be a lone ESC (cancel) or an escape sequence.
-        # Wait briefly for a continuation byte.  On slow PTYs (SSH/tmux) the
-        # bytes of an arrow key can arrive across separate reads, so a tiny
-        # timeout avoids misreading a split sequence as a bare ESC.
+        # Wait briefly for continuation bytes.  On slow PTYs (SSH/tmux) the
+        # bytes of an arrow key can arrive across separate reads, so a short
+        # timeout avoids misreading a split sequence as a bare ESC.  The
+        # timeout must stay active for the WHOLE tail read: restoring blocking
+        # mode before consuming the CSI introducer/tail made getch() block
+        # indefinitely when the continuation bytes never arrived (bare ESC
+        # delivered alone) — the menu froze until another key was pressed
+        # (#35).
         try:
             stdscr.timeout(60)
             nxt = stdscr.getch()
-        finally:
+        except Exception:
             stdscr.timeout(-1)  # restore blocking mode
+            raise
 
         if nxt == -1:
+            stdscr.timeout(-1)  # restore blocking mode
             return NAV_CANCEL  # genuine lone ESC
 
         if nxt in (ord("["), ord("O")):  # CSI / SS3 introducer
-            final = stdscr.getch()
+            final = stdscr.getch()  # still under the short timeout — never blocks
+            stdscr.timeout(-1)  # restore blocking mode
             if final in (ord("A"), ord("k")):
                 return NAV_UP
             if final in (ord("B"), ord("j")):
                 return NAV_DOWN
             # Consume the tail of any other CSI sequence (e.g. ``[3~`` Delete,
             # ``[H`` Home) up to its terminator so stray bytes don't leak into
-            # the next input() and corrupt it.
+            # the next input() and corrupt it.  The loop self-terminates on a
+            # timeout (-1) since -1 falls outside the parameter-byte range.
             while 0x20 <= final <= 0x3F:  # CSI parameter/intermediate bytes
                 final = stdscr.getch()
             return NAV_NONE
         # ESC followed by some other byte we don't handle — swallow it.
+        stdscr.timeout(-1)  # restore blocking mode
         return NAV_NONE
 
     return NAV_NONE
