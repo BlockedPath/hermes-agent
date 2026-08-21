@@ -17,7 +17,21 @@ from typing import Optional
 from hermes_cli.config import get_hermes_home
 
 
-CACHE_PATH = get_hermes_home() / "sticker_cache.json"
+def cache_path():
+    """Resolve per call — honors the multiplex per-turn home override (#8).
+
+    An explicitly-set module CACHE_PATH (tests monkeypatch it) wins.
+    """
+    override = globals().get("CACHE_PATH")
+    if override is not None:
+        return override
+    return get_hermes_home() / "sticker_cache.json"
+
+
+def __getattr__(name):  # PEP 562: lazy, override-honoring back-compat alias
+    if name == "CACHE_PATH":
+        return cache_path()
+    raise AttributeError(name)
 
 # Vision prompt for describing stickers -- kept concise to save tokens
 STICKER_VISION_PROMPT = (
@@ -28,9 +42,9 @@ STICKER_VISION_PROMPT = (
 
 def _load_cache() -> dict:
     """Load the sticker cache from disk."""
-    if CACHE_PATH.exists():
+    if cache_path().exists():
         try:
-            return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+            return json.loads(cache_path().read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {}
     return {}
@@ -38,16 +52,16 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict) -> None:
     """Save the sticker cache to disk atomically."""
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    cache_path().parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
-        dir=str(CACHE_PATH.parent), suffix=".tmp"
+        dir=str(cache_path().parent), suffix=".tmp"
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(cache, f, indent=2, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, str(CACHE_PATH))
+        os.replace(tmp_path, str(cache_path()))
     except BaseException:
         try:
             os.unlink(tmp_path)

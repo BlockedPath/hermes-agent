@@ -48,7 +48,21 @@ import yaml
 from hermes_cli.config import get_hermes_home
 
 
-HOOKS_DIR = get_hermes_home() / "hooks"
+def hooks_dir():
+    """Resolve per call — honors the multiplex per-turn home override (#8).
+
+    An explicitly-set module HOOKS_DIR (tests monkeypatch it) wins.
+    """
+    override = globals().get("HOOKS_DIR")
+    if override is not None:
+        return override
+    return get_hermes_home() / "hooks"
+
+
+def __getattr__(name):  # PEP 562: lazy, override-honoring back-compat alias
+    if name == "HOOKS_DIR":
+        return hooks_dir()
+    raise AttributeError(name)
 
 
 class HookRegistry:
@@ -92,10 +106,10 @@ class HookRegistry:
         """
         self._register_builtin_hooks()
 
-        if not HOOKS_DIR.exists():
+        if not hooks_dir().exists():
             return
 
-        for hook_dir in sorted(HOOKS_DIR.iterdir()):
+        for hook_dir in sorted(hooks_dir().iterdir()):
             if not hook_dir.is_dir():
                 continue
 

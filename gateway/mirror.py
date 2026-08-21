@@ -18,8 +18,26 @@ from hermes_cli.config import get_hermes_home
 
 logger = logging.getLogger(__name__)
 
-_SESSIONS_DIR = get_hermes_home() / "sessions"
-_SESSIONS_INDEX = _SESSIONS_DIR / "sessions.json"
+def sessions_index_path():
+    """Resolve per call — honors the multiplex per-turn home override (#8).
+
+    Explicitly-set module _SESSIONS_DIR/_SESSIONS_INDEX (tests) win.
+    """
+    idx = globals().get("_SESSIONS_INDEX")
+    if idx is not None:
+        return idx
+    d = globals().get("_SESSIONS_DIR")
+    if d is not None:
+        return d / "sessions.json"
+    return get_hermes_home() / "sessions" / "sessions.json"
+
+
+def __getattr__(name):  # PEP 562: lazy, override-honoring back-compat aliases
+    if name == "_SESSIONS_DIR":
+        return get_hermes_home() / "sessions"
+    if name == "_SESSIONS_INDEX":
+        return sessions_index_path()
+    raise AttributeError(name)
 
 
 def mirror_to_session(
@@ -151,11 +169,11 @@ def _find_session_id(
         logger.debug("Mirror state.db session lookup failed: %s", e)
 
     # Fallback: sessions.json (pre-migration databases)
-    if not _SESSIONS_INDEX.exists():
+    if not sessions_index_path().exists():
         return None
 
     try:
-        with open(_SESSIONS_INDEX, encoding="utf-8") as f:
+        with open(sessions_index_path(), encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
         return None
