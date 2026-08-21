@@ -577,8 +577,12 @@ def _resolve_config_gates() -> set[str]:
     if not gated:
         return set()
     try:
-        from hermes_cli.config import read_raw_config
-        cfg = read_raw_config()
+        # Merged, profile-aware, managed-overlay-aware READ-ONLY view.
+        # read_raw_config() here caused registry-derived surfaces (/help,
+        # Telegram menus) to miss admin-managed gate values that runtime
+        # dispatch honors — the two surfaces disagreed (#4).
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly()
     except Exception:
         return set()
     result: set[str] = set()
