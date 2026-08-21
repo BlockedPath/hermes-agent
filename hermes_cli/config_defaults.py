@@ -1026,6 +1026,11 @@ DEFAULT_CONFIG = {
         # OPENROUTER_API_KEY is present. Default false keeps the historical
         # paid fallback for users who want it.
         "free_only": False,
+        # Minimum remaining TTL a Nous OAuth key must have before the aux
+        # chain will use it for a background call (seconds). Keys closer to
+        # expiry trigger a proactive refresh. Default 1800 (30 min), clamped
+        # >= 60. Env mirror: HERMES_NOUS_MIN_KEY_TTL_SECONDS.
+        "nous_min_key_ttl_seconds": 1800,
         # Override the auxiliary auto-chain's OpenRouter fallback model
         # (default: google/gemini-3.6-flash, a PAID model). Set e.g.
         # "nvidia/nemotron-3-ultra-550b-a55b:free" together with
