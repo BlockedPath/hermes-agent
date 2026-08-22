@@ -2583,6 +2583,23 @@ DEFAULT_CONFIG = {
         # overridable via HERMES_CRON_MEDIA_SEND_TIMEOUT env var. Keep in
         # sync with cron.scheduler._DEFAULT_MEDIA_SEND_TIMEOUT.
         "media_send_timeout_seconds": 300,
+        # Consecutive-failure count at which cron sends a nudge alert about
+        # the job (0 disables nudging). Also read inline by the scheduler.
+        "failure_nudge_threshold": 3,
+        # Timeout (seconds) for the scheduler's periodic cleanup pass.
+        "cleanup_timeout_seconds": 30,
+        # Cap (minutes) on how long an in-flight job may run before the
+        # dispatcher considers it hung. null/0 = unbounded.
+        "inflight_max_minutes": None,
+        # Grace window (minutes) after a missed fire time within which a
+        # one-shot job still runs. Non-positive disables catch-up entirely.
+        "misfire_grace_minutes": 10,
+        # Completed one-shot jobs older than this many days are pruned from
+        # the jobs table. 0 or negative disables pruning.
+        "completed_retention_days": 7,
+        # Timeout (seconds) of cron agent inactivity before the run is
+        # killed. 0 = unlimited. Env mirror: HERMES_CRON_TIMEOUT.
+        "inactivity_timeout_seconds": 300,
     },
 
     # Kanban multi-agent coordination — controls the dispatcher loop that
