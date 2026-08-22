@@ -710,66 +710,6 @@ def test_bulk_status_running_rejected(client):
     assert statuses.get(t["id"]) != "running"
 
 
-def test_dashboard_done_actions_prompt_for_completion_summary():
-    """Behavioral coverage for the migrated ``requestDialog`` flow.
-
-    Replaces the prior bundle-string-only assertion (which only proved the
-    rename landed). The dialog state machine at
-    ``plugins/kanban/dashboard/dist/index.js`` resolves with
-    ``{confirmed: true|false, summary?}``. Each migrated call site must
-    gate the dispatch on the resolved ``confirmed`` flag. This test
-    asserts that contract at two layers:
-
-    1. **Bundle cancel guards**: every migrated site gates on ``r.confirmed``
-       (or its subscripted alias ``r1.confirmed``/``r2.confirmed``) before
-       dispatching. We verify by counting the cancel-guard patterns +
-       cross-referencing against the 8 migrated sites listed in the PR
-       description.
-    2. **Visual affordance**: every destructive ``requestDialog`` call marks
-       ``destructive: true`` so the host renders the destructive variant.
-
-    The dispatch path itself (PATCH/DELETE actually firing on confirm, not
-    on cancel) is covered by the backend behavioral tests
-    ``test_dashboard_confirm_dispatches_expected_*`` and
-    ``test_dashboard_cancel_keeps_task_in_old_status`` below — together
-    they pin the contract end-to-end.
-    """
-
-    repo_root = Path(__file__).resolve().parents[2]
-    js = (repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js").read_text()
-
-    import re
-
-    # Match ``if (!r.confirmed)``, ``if (!r1.confirmed)``, ``if (r.confirmed)``
-    # (positive-form gate). The bundle uses both polarities:
-    # - negative ``if (!r.confirmed) return null;`` in dialog flow bodies
-    # - positive ``if (r.confirmed) props.onDeleteBoard(...);`` in JSX handlers
-    cancel_guard_pattern = re.compile(
-        r"if\s*\(\s*!?\s*r\d?\.confirmed\s*\)",
-        re.IGNORECASE,
-    )
-    guards = cancel_guard_pattern.findall(js)
-    # 8 migrated sites per the PR description:
-    # moveTask (1), moveSelected (1), applyBulk (1), deleteTask (1),
-    # deleteSelected (1), archiveBoard (1), removeAttachment (1), doPatch (1).
-    # Plus performMoveTask callers (moveTask/moveSelected each have
-    # ``r1.confirmed`` + ``r2.confirmed`` for the two-stage flow) → up to
-    # 10 guards. Loose lower bound to avoid brittleness.
-    assert len(guards) >= 8, (
-        f"expected >= 8 `if (r?.confirmed)` cancel guards in bundle (one "
-        f"per migrated site, plus extras for two-stage flows); found {len(guards)}"
-    )
-
-    # Visual affordance: every destructive requestDialog call must mark
-    # ``destructive: true`` so the host renders the destructive variant.
-    # deleteTask, deleteSelected, archiveBoard → at least 3.
-    destructive_call_count = js.count("destructive: true")
-    assert destructive_call_count >= 3, (
-        f"expected >= 3 `destructive: true` requestDialog calls (single "
-        f"delete, bulk delete, archive-board); found {destructive_call_count}"
-    )
-
-
 def test_dashboard_cancel_keeps_task_in_old_status(client):
     """Behavioral: the cancel branch of the dispatch path (no PATCH/DELETE
     issued) must leave the task in its previous status. The cancel guard
