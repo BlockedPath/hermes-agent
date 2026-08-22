@@ -720,17 +720,56 @@ class TestMicroCompaction:
         and, if the compressor ever holds a DB binding, would
         archive_and_compact the CANONICAL session rows.
         """
-        import inspect
+        from unittest.mock import MagicMock
 
+        # Behavioral: a persist-disabled agent with an otherwise-eligible
+        # compressor must never reach _micro_compact.
         from agent import turn_finalizer
 
-        src = inspect.getsource(turn_finalizer.finalize_turn)
-        micro_block = src.split("Post-turn micro-compaction", 1)[1]
-        # Scope to the micro block only: stop at the persist call that follows.
-        micro_block = micro_block.split("agent._persist_session", 1)[0]
-        assert "_persist_disabled" in micro_block, (
-            "micro-compaction gate must check agent._persist_disabled"
+        compressor = MagicMock()
+        compressor._micro_compact_enabled = True
+        compressor._micro_compact = MagicMock(return_value=[])
+        class _StubAgent:
+            """Minimal agent surface for finalize_turn; numeric/bool attrs
+            default to inert values so unrelated post-turn blocks no-op."""
+
+            def __init__(self, compressor, persist_disabled):
+                object.__setattr__(self, "iteration_budget", type("B", (), {"remaining": 10, "used": 3, "max_total": 500})())
+                self.context_compressor = compressor
+                self._persist_disabled = persist_disabled
+                self.max_iterations = 500
+                self.iteration_budget.remaining = 10
+                self._skill_nudge_interval = 0
+                self._iters_since_skill = 0
+                self.valid_tool_names = frozenset()
+                self._db_flush_scan_prefix = None
+                self._turn_received_provider_response = True
+
+            def __getattr__(self, name):
+                if name.endswith(("_enabled",)) or name.startswith("_turn_failed"):
+                    return False
+                if name in ("_db_persist",):
+                    return lambda *a, **kw: None
+                return MagicMock()
+
+        agent = _StubAgent(compressor, True)
+
+        turn_finalizer.finalize_turn(
+            agent,
+            final_response="ok",
+            api_call_count=1,
+            interrupted=False,
+            failed=False,
+            messages=[{"role": "user", "content": "hi"}],
+            conversation_history=[],
+            effective_task_id="t",
+            turn_id="u",
+            user_message="hi",
+            original_user_message="hi",
+            _should_review_memory=False,
+            _turn_exit_reason="done",
         )
+        compressor._micro_compact.assert_not_called()
 
     def test_splice_preserves_db_persisted_stamps(self):
         """Surviving messages keep their _db_persisted stamps through a splice.
@@ -806,18 +845,56 @@ class TestDefragFlushCursorInvalidation:
         """finalize_turn's micro-compaction block must translate the
         compressor flag into agent._db_flush_scan_prefix = None (and reset
         the flag) so the next flush re-examines the rewritten marker row."""
-        import inspect
+        from unittest.mock import MagicMock
 
         from agent import turn_finalizer
 
-        src = inspect.getsource(turn_finalizer.finalize_turn)
-        micro_block = src.split("Post-turn micro-compaction", 1)[1]
-        micro_block = micro_block.split("agent._persist_session", 1)[0]
-        assert "_flush_scan_cursor_invalidated" in micro_block, (
-            "finalize_turn must consume the compressor's cursor-invalidation "
-            "flag raised by the defrag marker pop"
+        # Behavioral: a persist-enabled agent whose compressor raises the
+        # defrag flag must (a) consume the flag and (b) null the agent's
+        # bounded flush-scan cursor.
+        compressor = MagicMock()
+        compressor._micro_compact_enabled = True
+        compressor._micro_compact = MagicMock(return_value=[])
+        compressor._flush_scan_cursor_invalidated = True
+        class _StubAgent:
+            """Minimal agent surface for finalize_turn; numeric/bool attrs
+            default to inert values so unrelated post-turn blocks no-op."""
+
+            def __init__(self, compressor, persist_disabled):
+                object.__setattr__(self, "iteration_budget", type("B", (), {"remaining": 10, "used": 3, "max_total": 500})())
+                self.context_compressor = compressor
+                self._persist_disabled = persist_disabled
+                self.max_iterations = 500
+                self.iteration_budget.remaining = 10
+                self._skill_nudge_interval = 0
+                self._iters_since_skill = 0
+                self.valid_tool_names = frozenset()
+                self._db_flush_scan_prefix = 5
+                self._turn_received_provider_response = True
+
+            def __getattr__(self, name):
+                if name.endswith(("_enabled",)) or name.startswith("_turn_failed"):
+                    return False
+                if name in ("_db_persist",):
+                    return lambda *a, **kw: None
+                return MagicMock()
+
+        agent = _StubAgent(compressor, False)
+
+        turn_finalizer.finalize_turn(
+            agent,
+            final_response="ok",
+            api_call_count=1,
+            interrupted=False,
+            failed=False,
+            messages=[{"role": "user", "content": "hi"}],
+            conversation_history=[],
+            effective_task_id="t",
+            turn_id="u",
+            user_message="hi",
+            original_user_message="hi",
+            _should_review_memory=False,
+            _turn_exit_reason="done",
         )
-        assert "agent._db_flush_scan_prefix = None" in micro_block, (
-            "finalize_turn must invalidate the bounded flush-scan cursor "
-            "when the defrag pop stripped a live marker's stamp"
-        )
+        assert compressor._flush_scan_cursor_invalidated is False
+        assert agent._db_flush_scan_prefix is None
