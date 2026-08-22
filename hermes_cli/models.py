@@ -1457,6 +1457,14 @@ _PROVIDER_ALIASES = {
     "lm_studio": "lmstudio",
     "ollama": "custom",  # bare "ollama" = local; use "ollama-cloud" for cloud
     "ollama_cloud": "ollama-cloud",
+    # Mirrors CloudflareWorkersAIProfile.aliases. Profile-declared aliases
+    # auto-extend PROVIDER_REGISTRY (auth.py) and CANONICAL_PROVIDERS (below)
+    # but NOT this map, so a `provider:model` shorthand typed against an
+    # alias that is missing here falls through to openrouter carrying the
+    # whole "cloudflare:@cf/..." string as a model name.
+    "cloudflare": "cloudflare-workers-ai",
+    "workers-ai": "cloudflare-workers-ai",
+    "cloudflare-ai": "cloudflare-workers-ai",
 }
 
 
@@ -4061,7 +4069,12 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
         from hermes_cli.auth import resolve_api_key_provider_credentials
 
         _p = get_provider_profile(normalized)
-        if _p and _p.auth_type == "api_key" and _p.base_url:
+        # Do not gate profile discovery on the import-time ``_p.base_url``.
+        # Some providers resolve account-scoped endpoints lazily, while others
+        # are intentionally configured only through their *_BASE_URL override.
+        # Let credential resolution and ``fetch_models`` decide whether a live
+        # endpoint is available; fallback_models still handles an absent one.
+        if _p and _p.auth_type == "api_key":
             try:
                 creds = resolve_api_key_provider_credentials(normalized)
                 api_key = str(creds.get("api_key") or "").strip()

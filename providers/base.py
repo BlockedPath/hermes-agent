@@ -55,6 +55,10 @@ class ProviderProfile:
     models_url: str = ""  # explicit models endpoint; falls back to {base_url}/models
     auth_type: str = "api_key"   # api_key|oauth_device_code|oauth_external|copilot|aws_sdk
     supports_health_check: bool = True  # False → doctor skips /models probe for this provider
+    # True when credentials are unusable without a resolved endpoint. Most
+    # providers have a static base_url; account/resource-scoped providers may
+    # resolve theirs lazily or require a *_BASE_URL override.
+    requires_base_url: bool = False
 
     # ── Vision support ────────────────────────────────────────
     # True when the provider's API accepts image content inside
@@ -116,6 +120,16 @@ class ProviderProfile:
         answer so the caller falls through to ``default_aux_model``.
         """
         return ""
+
+    def resolve_base_url(self, configured_url: str = "") -> str:
+        """Return the effective inference endpoint for this provider.
+
+        ``configured_url`` is the request-time env/config override resolved by
+        the caller. Profiles with account- or resource-scoped endpoints can
+        override this hook to derive a URL from scoped credentials without
+        freezing it at plugin-import time.
+        """
+        return (configured_url or self.base_url or "").strip().rstrip("/")
 
     def get_hostname(self) -> str:
         """Return the provider's base hostname for URL-based detection.
