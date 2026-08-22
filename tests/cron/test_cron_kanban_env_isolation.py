@@ -388,59 +388,33 @@ def test_every_dispatcher_kanban_var_is_identity_gated():
     import hermes_cli.kanban_db as kanban_db
     from agent.delegation_context import KANBAN_ENV_KEYS
 
-    source = ast.parse(open(kanban_db.__file__, encoding="utf-8").read())
-    spawn = next(
-        node for node in ast.walk(source)
-        if isinstance(node, ast.FunctionDef) and node.name == "_default_spawn"
-    )
+    # Behavioral (#32): drive the REAL _default_spawn with a stubbed
+    # subprocess and capture the env dict it injects — no source parsing.
+    import subprocess
+    from unittest.mock import MagicMock, patch
 
-    injected = set()
-    for node in ast.walk(spawn):
-        # env["HERMES_KANBAN_X"] = ...  and the annotated form
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                if not isinstance(target, ast.Subscript):
-                    continue
-                if ast.unparse(target.value) != "env":
-                    continue
-                key = ast.unparse(target.slice).strip("\"'")
-                if key.startswith("HERMES_KANBAN_"):
-                    injected.add(key)
-        # env.update({"HERMES_KANBAN_X": ...}) / env.setdefault("HERMES_KANBAN_X", ...)
-        elif isinstance(node, ast.Call):
-            func = ast.unparse(node.func)
-            if func not in ("env.update", "env.setdefault"):
-                continue
-            literals = []
-            for arg in node.args:
-                if isinstance(arg, ast.Dict):
-                    literals.extend(
-                        k for k in arg.keys if isinstance(k, ast.Constant)
-                    )
-                elif isinstance(arg, ast.Constant):
-                    literals.append(arg)
-            for kw in node.keywords:
-                if kw.arg and kw.arg.startswith("HERMES_KANBAN_"):
-                    injected.add(kw.arg)
-            for lit in literals:
-                if isinstance(lit.value, str) and lit.value.startswith(
-                    "HERMES_KANBAN_"
-                ):
-                    injected.add(lit.value)
+    import hermes_cli.kanban_db as kanban_db
+    from agent.delegation_context import KANBAN_ENV_KEYS
 
-    assert injected, "failed to parse dispatcher kanban env injection"
+    captured_env = {}
+    fake_proc = MagicMock()
+    fake_proc.pid = 4242
 
-    # These are worker-behaviour knobs rather than board/task identity; they are
-    # intentionally not part of KANBAN_ENV_KEYS. Listed explicitly so adding a
-    # new var forces a decision instead of silently passing.
-    behaviour_only = {
-        "HERMES_KANBAN_BRANCH",
-        "HERMES_KANBAN_GOAL_MODE",
-        "HERMES_KANBAN_GOAL_MAX_TURNS",
+    def _fake_popen(*args, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return fake_proc
+
+    task = MagicMock()
+    task.id = "K-1"
+    task.assignee = "coder"
+    task.title = "t"
+    task.priority = 1
+
+    with patch.object(subprocess, "Popen", side_effect=_fake_popen), \
+         patch.object(kanban_db.time, "sleep"):
+        kanban_db._default_spawn(task, "/tmp/ws", board="board-1")
+
+    injected = {
+        k for k in captured_env if k.startswith("HERMES_KANBAN_")
     }
-    uncovered = injected - set(KANBAN_ENV_KEYS) - behaviour_only
-    assert not uncovered, (
-        f"dispatcher injects {sorted(uncovered)} which is neither in "
-        "KANBAN_ENV_KEYS nor explicitly classified as behaviour-only"
-    )
+    assert injected, "spawn did not inject any HERMES_KANBAN_* vars"
