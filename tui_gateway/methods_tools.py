@@ -33,7 +33,10 @@ def _(rid, params: dict) -> dict:
             },
         )
     except Exception:
-        return _ok(rid, {"available": False, "percent": None, "plugged": None, "category": "dim"})
+        return _ok(
+            rid,
+            {"available": False, "percent": None, "plugged": None, "category": "dim"},
+        )
 
 
 @method("process.stop")
@@ -131,7 +134,9 @@ def _(rid, params: dict) -> dict:
                 )
             except Exception as exc:
                 return _err(rid, 5019, f"compute-host reload_mcp failed: {exc}")
-            return _ok(rid, {"status": "reloaded", "turn_isolation": True, "host_ack": ack})
+            return _ok(
+                rid, {"status": "reloaded", "turn_isolation": True, "host_ack": ack}
+            )
 
         from tools.mcp_tool import shutdown_mcp_servers, discover_mcp_tools
 
@@ -160,7 +165,11 @@ def _(rid, params: dict) -> dict:
                     "Failed to refresh cached agent tools after /reload-mcp: %s",
                     _exc,
                 )
-            _emit("session.info", params.get("session_id", ""), _session_info(agent, session))
+            _emit(
+                "session.info",
+                params.get("session_id", ""),
+                _session_info(agent, session),
+            )
 
         global _mcp_reload_gen, _mcp_reload_loaded_rev
 
@@ -267,6 +276,9 @@ def _(rid, params: dict) -> dict:
         categories: list[dict] = []
         cat_map: dict[str, list[list[str]]] = {}
         cat_order: list[str] = []
+        # Per-entry classification for clients that curate by provenance
+        # instead of name sets (#21): builtin | quick | skill.
+        kinds: dict[str, str] = {}
 
         for cmd in COMMAND_REGISTRY:
             if cmd.name in _TUI_HIDDEN or cmd.gateway_only:
@@ -279,6 +291,7 @@ def _(rid, params: dict) -> dict:
 
             desc = _build_description(cmd)
             all_pairs.append([c, desc])
+            kinds[c] = "builtin"
 
             cat = cmd.category
             if cat not in cat_map:
@@ -295,6 +308,7 @@ def _(rid, params: dict) -> dict:
                 continue
             canon[name.lower()] = name
             all_pairs.append([name, desc])
+            kinds[name] = "builtin"
             if cat not in cat_map:
                 cat_map[cat] = []
                 cat_order.append(cat)
@@ -323,6 +337,7 @@ def _(rid, params: dict) -> dict:
                     qdesc = str(qc.get("description") or default_desc)
                     qdesc = qdesc[:120] + ("…" if len(qdesc) > 120 else "")
                     all_pairs.append([key, qdesc])
+                    kinds[key] = "quick"
                     cat_map[bucket].append([key, qdesc])
         except Exception as e:
             if not warning:
@@ -342,6 +357,7 @@ def _(rid, params: dict) -> dict:
             for k, info in sorted(scan_skill_commands().items()):
                 d = str(info.get("description", "Skill"))
                 all_pairs.append([k, d[:120] + ("…" if len(d) > 120 else "")])
+                kinds[k] = "skill"
                 name = str(info.get("name") or k.lstrip("/"))
                 skills[k] = {"usage": usage(name), "origin": origin_of(name)}
                 skill_count += 1
@@ -350,6 +366,12 @@ def _(rid, params: dict) -> dict:
 
         for cat in cat_order:
             categories.append({"name": cat, "pairs": cat_map[cat]})
+
+        # TUI-category entries are handled client-side by the classic TUI
+        # (display toggles, log viewer, mouse presets, session switcher) —
+        # advertise them as client-surface so remote clients (desktop) can
+        # filter without a synchronized blocklist (#21).
+        client_only = [name for names in cat_map.get("TUI", []) for name in [names[0]]]
 
         sub = {k: v[:] for k, v in SUBCOMMANDS.items()}
         return _ok(
@@ -361,6 +383,8 @@ def _(rid, params: dict) -> dict:
                 "categories": categories,
                 "skills": skills,
                 "skill_count": skill_count,
+                "kinds": kinds,
+                "client_only": client_only,
                 "warning": warning,
             },
         )
@@ -445,6 +469,7 @@ def _(rid, params: dict) -> dict:
             # quick commands run in the TUI server process which
             # has all API keys in os.environ.
             from tools.environments.local import build_subprocess_env
+
             sanitized_env = build_subprocess_env()
             from hermes_cli._subprocess_compat import windows_hide_flags
 
@@ -455,7 +480,8 @@ def _(rid, params: dict) -> dict:
                 text=True,
                 # Force UTF-8 + lossy decode so non-UTF-8 child output can't
                 # crash the gateway thread on locale-mismatched Windows (#53137).
-                encoding="utf-8", errors="replace",
+                encoding="utf-8",
+                errors="replace",
                 timeout=30,
                 stdin=subprocess.DEVNULL,
                 env=sanitized_env,
@@ -468,6 +494,7 @@ def _(rid, params: dict) -> dict:
             ).strip()[:4000]
             if output:
                 from agent.redact import redact_sensitive_text
+
                 output = redact_sensitive_text(output)
             if r.returncode != 0:
                 return _err(
@@ -502,9 +529,7 @@ def _(rid, params: dict) -> dict:
         from hermes_cli.commands import resolve_command
 
         bundle_key = (
-            resolve_bundle_command_key(name)
-            if resolve_command(name) is None
-            else None
+            resolve_bundle_command_key(name) if resolve_command(name) is None else None
         )
     except Exception:
         bundle_key = None
@@ -592,7 +617,9 @@ def _(rid, params: dict) -> dict:
         # merge-updates AGENTS.md via write_file. Works on any backend.
         from hermes_cli.init_command import build_init_prompt_for_cwd
 
-        return _ok(rid, {"type": "send", "message": build_init_prompt_for_cwd(extra=arg)})
+        return _ok(
+            rid, {"type": "send", "message": build_init_prompt_for_cwd(extra=arg)}
+        )
     if name == "moa":
         # /moa is one-shot sugar only: run a single prompt through the default
         # MoA preset, then restore the prior model. To *switch* to a MoA preset
@@ -673,7 +700,9 @@ def _(rid, params: dict) -> dict:
         if _action == "usage":
             return _err(rid, 4004, "usage: /focus [on|off|status]")
         if _action == "status":
-            _saved = _d_focus.get("focus_saved_tool_progress") or _load_tool_progress_mode()
+            _saved = (
+                _d_focus.get("focus_saved_tool_progress") or _load_tool_progress_mode()
+            )
             return _ok(
                 rid,
                 {"type": "exec", "output": format_focus_status(_cur_focus, _saved)},
@@ -801,9 +830,13 @@ def _(rid, params: dict) -> dict:
             # immediately; `display` keeps the transcript showing the
             # concise invocation instead of the model-facing scaffolding.
             prompt = mgr.next_continuation_prompt()
-            notice = f"▶ Goal resumed: {state.goal}\nContinuing now — taking the next step."
+            notice = (
+                f"▶ Goal resumed: {state.goal}\nContinuing now — taking the next step."
+            )
             if not prompt:
-                return _ok(rid, {"type": "exec", "output": f"▶ Goal resumed: {state.goal}"})
+                return _ok(
+                    rid, {"type": "exec", "output": f"▶ Goal resumed: {state.goal}"}
+                )
             return _ok(
                 rid,
                 {
@@ -905,7 +938,11 @@ def _(rid, params: dict) -> dict:
                 try:
                     n = int(arg_str.split()[0])
                 except (ValueError, IndexError):
-                    return _err(rid, 4004, f"undo: invalid count {arg_str!r} — use /undo or /undo N")
+                    return _err(
+                        rid,
+                        4004,
+                        f"undo: invalid count {arg_str!r} — use /undo or /undo N",
+                    )
             if n < 1:
                 n = 1
             try:
@@ -969,7 +1006,8 @@ def _(rid, params: dict) -> dict:
         target_text = target_msg.get("content") or ""
         if isinstance(target_text, list):
             parts = [
-                p.get("text", "") for p in target_text
+                p.get("text", "")
+                for p in target_text
                 if isinstance(p, dict) and p.get("type") == "text"
             ]
             target_text = "\n".join(t for t in parts if t)
@@ -1095,7 +1133,14 @@ def _(rid, params: dict) -> dict:
                 {
                     "type": "exec",
                     "output": "\n".join(
-                        filter(None, [summary["headline"], summary["token_line"], summary.get("note")])
+                        filter(
+                            None,
+                            [
+                                summary["headline"],
+                                summary["token_line"],
+                                summary.get("note"),
+                            ],
+                        )
                     ),
                 },
             )
@@ -1108,6 +1153,7 @@ def _(rid, params: dict) -> dict:
             from agent.manual_compression_feedback import (
                 describe_compression_lock_skip,
             )
+
             return _ok(
                 rid,
                 {"type": "exec", "output": describe_compression_lock_skip(e.holder)},
@@ -1193,7 +1239,10 @@ def _(rid, params: dict) -> dict:
 
     try:
         from agent.skill_commands import get_skill_commands
-        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+        from hermes_constants import (
+            reset_hermes_home_override,
+            set_hermes_home_override,
+        )
 
         # Re-bind HERMES_HOME to the session's profile so get_skill_commands()
         # sees that profile's skills.external_dirs rather than whatever the
@@ -1201,9 +1250,7 @@ def _(rid, params: dict) -> dict:
         # handler on the pool with a copied context, and nothing upstream of
         # here binds the override for slash.exec.
         _profile_home = session.get("profile_home")
-        _home_token = (
-            set_hermes_home_override(_profile_home) if _profile_home else None
-        )
+        _home_token = set_hermes_home_override(_profile_home) if _profile_home else None
         try:
             _cmd_key = f"/{_cmd_base}"
             if _cmd_key in get_skill_commands():
@@ -1508,15 +1555,13 @@ def _(rid, params: dict) -> dict:
             info = get_toolset_info(name)
             if not info:
                 continue
-            items.append(
-                {
-                    "name": name,
-                    "description": info["description"],
-                    "tool_count": info["tool_count"],
-                    "enabled": name in enabled if enabled else True,
-                    "tools": info["resolved_tools"],
-                }
-            )
+            items.append({
+                "name": name,
+                "description": info["description"],
+                "tool_count": info["tool_count"],
+                "enabled": name in enabled if enabled else True,
+                "tools": info["resolved_tools"],
+            })
         return _ok(rid, {"toolsets": items})
     except Exception as e:
         return _err(rid, 5031, str(e))
@@ -1535,8 +1580,9 @@ def _(rid, params: dict) -> dict:
         )
         # Pre-assembly list: /tools is a discovery surface and must show
         # tools deferred behind the tool_search bridge (same as the CLI).
-        tools = get_tool_definitions(enabled_toolsets=enabled, quiet_mode=True,
-                                     skip_tool_search_assembly=True)
+        tools = get_tool_definitions(
+            enabled_toolsets=enabled, quiet_mode=True, skip_tool_search_assembly=True
+        )
         sections = {}
 
         for tool in sorted(tools, key=lambda t: t["function"]["name"]):
@@ -1544,12 +1590,10 @@ def _(rid, params: dict) -> dict:
             desc = str(tool["function"].get("description", "") or "").split("\n")[0]
             if ". " in desc:
                 desc = desc[: desc.index(". ") + 1]
-            sections.setdefault(get_toolset_for_tool(name) or "unknown", []).append(
-                {
-                    "name": name,
-                    "description": desc,
-                }
-            )
+            sections.setdefault(get_toolset_for_tool(name) or "unknown", []).append({
+                "name": name,
+                "description": desc,
+            })
 
         return _ok(
             rid,
@@ -1651,14 +1695,12 @@ def _(rid, params: dict) -> dict:
             info = get_toolset_info(name)
             if not info:
                 continue
-            items.append(
-                {
-                    "name": name,
-                    "description": info["description"],
-                    "tool_count": info["tool_count"],
-                    "enabled": name in enabled if enabled else True,
-                }
-            )
+            items.append({
+                "name": name,
+                "description": info["description"],
+                "tool_count": info["tool_count"],
+                "enabled": name in enabled if enabled else True,
+            })
         return _ok(rid, {"toolsets": items})
     except Exception as e:
         return _err(rid, 5032, str(e))
@@ -1717,7 +1759,9 @@ def _(rid, params: dict) -> dict:
             result = json.loads(
                 cronjob(
                     action="list",
-                    include_disabled=is_truthy_value(params.get("include_disabled", False)),
+                    include_disabled=is_truthy_value(
+                        params.get("include_disabled", False)
+                    ),
                 )
             )
             # This marker proves the gateway honored the optional profile
@@ -1789,7 +1833,12 @@ def _(rid, params: dict) -> dict:
         from agent.learning_graph_render import render_frames
 
         payload = build_learning_graph()
-        return _ok(rid, render_frames(payload, cols=max(20, cols), rows=max(10, rows), frames=frames))
+        return _ok(
+            rid,
+            render_frames(
+                payload, cols=max(20, cols), rows=max(10, rows), frames=frames
+            ),
+        )
     except Exception as exc:  # noqa: BLE001
         return _err(rid, 5000, f"learning.frames failed: {exc}")
 
@@ -1822,7 +1871,9 @@ def _(rid, params: dict) -> dict:
     try:
         from agent.learning_mutations import edit_node
 
-        return _ok(rid, edit_node(str(params.get("id", "")), str(params.get("content", ""))))
+        return _ok(
+            rid, edit_node(str(params.get("id", "")), str(params.get("content", "")))
+        )
     except Exception as exc:  # noqa: BLE001
         return _err(rid, 5000, f"learning.edit failed: {exc}")
 
@@ -1941,21 +1992,19 @@ def _(rid, params: dict) -> dict:
                 requires = [str(k) for k in (getattr(entry, "env_keys", None) or [])]
             except Exception:
                 requires = []
-            out.append(
-                {
-                    "name": entry.name,
-                    "description": getattr(entry, "description", "") or "",
-                    "installed": bool(mcp_catalog.is_installed(entry.name)),
-                    "enabled": bool(mcp_catalog.is_enabled(entry.name)),
-                    "requires": requires,
-                    # TransportSpec object — reduce to its kind string.
-                    "transport": str(
-                        getattr(getattr(entry, "transport", None), "kind", "")
-                        or getattr(entry, "transport", "")
-                        or "stdio"
-                    ),
-                }
-            )
+            out.append({
+                "name": entry.name,
+                "description": getattr(entry, "description", "") or "",
+                "installed": bool(mcp_catalog.is_installed(entry.name)),
+                "enabled": bool(mcp_catalog.is_enabled(entry.name)),
+                "requires": requires,
+                # TransportSpec object — reduce to its kind string.
+                "transport": str(
+                    getattr(getattr(entry, "transport", None), "kind", "")
+                    or getattr(entry, "transport", "")
+                    or "stdio"
+                ),
+            })
         return _ok(rid, {"servers": out})
     except Exception as e:
         return _err(rid, 5024, str(e))
@@ -2079,7 +2128,10 @@ def _(rid, params: dict) -> dict:
                 f"server '{name}' rejected: suspicious command/args configuration",
             )
         saved = _get_mcp_servers().get(name, server_config)
-        return _ok(rid, {"ok": True, "name": name, "server": _mcp_summarize_server(name, saved)})
+        return _ok(
+            rid,
+            {"ok": True, "name": name, "server": _mcp_summarize_server(name, saved)},
+        )
     except Exception as e:
         return _err(rid, 5024, str(e))
     finally:
@@ -2306,13 +2358,9 @@ def _(rid, params: dict) -> dict:
             return _err(rid, 4064, f"server '{name}' not found")
         cfg = dict(servers[name])
         if not cfg.get("url"):
-            return _err(
-                rid, 4001, "stdio servers authenticate via env keys, not OAuth"
-            )
+            return _err(rid, 4001, "stdio servers authenticate via env keys, not OAuth")
         if cfg.get("headers") and cfg.get("auth") != "oauth":
-            return _err(
-                rid, 4001, "this server uses header/API-key auth, not OAuth"
-            )
+            return _err(rid, 4001, "this server uses header/API-key auth, not OAuth")
         cfg["auth"] = "oauth"
 
         hermes_home = str(get_hermes_home().expanduser().resolve(strict=False))
@@ -2443,22 +2491,20 @@ def _(rid, params: dict) -> dict:
                     and _bundled_default_on(_dir)
                 ):
                     status = "enabled"
-                out.append(
-                    {
-                        "name": name,
-                        # Canonical registry key (e.g. ``image_gen/fal``). Names
-                        # can collide across category dirs — both fal backends
-                        # are named "fal" — so toggles must address the key.
-                        "key": key,
-                        "version": str(version or ""),
-                        "description": desc or "",
-                        "source": source,
-                        "status": status,
-                        # Agent Plugins v1 package (plugin.json — the portable
-                        # skills/MCP format) vs a native Hermes plugin.
-                        "portable": _is_portable_plugin_dir(_dir),
-                    }
-                )
+                out.append({
+                    "name": name,
+                    # Canonical registry key (e.g. ``image_gen/fal``). Names
+                    # can collide across category dirs — both fal backends
+                    # are named "fal" — so toggles must address the key.
+                    "key": key,
+                    "version": str(version or ""),
+                    "description": desc or "",
+                    "source": source,
+                    "status": status,
+                    # Agent Plugins v1 package (plugin.json — the portable
+                    # skills/MCP format) vs a native Hermes plugin.
+                    "portable": _is_portable_plugin_dir(_dir),
+                })
             return out
 
         if action == "list":
@@ -2485,9 +2531,7 @@ def _(rid, params: dict) -> dict:
             result = dashboard_set_agent_plugin_enabled(ident, enabled=enable)
             if not result.get("ok"):
                 return _err(rid, 5026, result.get("error") or "toggle failed")
-            row = next(
-                (r for r in _rows() if ident in (r["key"], r["name"])), None
-            )
+            row = next((r for r in _rows() if ident in (r["key"], r["name"])), None)
             return _ok(
                 rid,
                 {
@@ -2501,9 +2545,7 @@ def _(rid, params: dict) -> dict:
         if action == "install":
             from hermes_cli.plugins_cmd import dashboard_install_plugin
 
-            ident = (
-                params.get("identifier") or params.get("repo") or ""
-            ).strip()
+            ident = (params.get("identifier") or params.get("repo") or "").strip()
             if not ident:
                 return _err(
                     rid, 4019, "plugins.install requires 'identifier' or 'repo'"
@@ -2535,7 +2577,9 @@ def _(rid, params: dict) -> dict:
         is_hardline, hardline_desc = detect_hardline_command(cmd)
         if is_hardline:
             return _err(
-                rid, 4005, f"blocked (hardline): {hardline_desc}. Use the agent for dangerous commands."
+                rid,
+                4005,
+                f"blocked (hardline): {hardline_desc}. Use the agent for dangerous commands.",
             )
         is_dangerous, _, desc = detect_dangerous_command(cmd)
         if is_dangerous:
@@ -2543,15 +2587,23 @@ def _(rid, params: dict) -> dict:
                 rid, 4005, f"blocked: {desc}. Use the agent for dangerous commands."
             )
     except ImportError:
-        return _err(rid, 5001, "shell.exec unavailable: approval safety module not importable")
+        return _err(
+            rid, 5001, "shell.exec unavailable: approval safety module not importable"
+        )
     try:
         from hermes_cli._subprocess_compat import windows_hide_flags
 
         r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=30, cwd=os.getcwd(),
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=os.getcwd(),
             # Force UTF-8 + lossy decode so non-UTF-8 child output can't crash
             # the gateway thread on locale-mismatched Windows (#53137).
-            encoding="utf-8", errors="replace",
+            encoding="utf-8",
+            errors="replace",
             stdin=subprocess.DEVNULL,
             creationflags=windows_hide_flags(),
         )
