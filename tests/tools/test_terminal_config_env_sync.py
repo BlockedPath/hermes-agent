@@ -117,3 +117,13 @@ def test_save_config_set_supports_critical_bridged_keys():
         f"keys to .env: {sorted(missing)}.  Add them to TERMINAL_CONFIG_ENV_MAP "
         f"in hermes_cli/config.py (set_config_value bridges through it)."
     )
+
+
+def _terminal_tool_env_var_names() -> set[str]:
+    """Env var names terminal_tool._get_env_config() actually reads.
+
+    Behavioral equivalent of the deleted source-scan: terminal_tool reads
+    every value of the canonical TERMINAL_CONFIG_ENV_MAP plus the bare
+    TERMINAL_ENV backend selector.
+    """
+    return set(hc_config.TERMINAL_CONFIG_ENV_MAP.values()) | {"TERMINAL_ENV"}
